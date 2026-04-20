@@ -10,5 +10,5 @@ export default defineConfig({
   minify: true,
   sourcemap: false,
   external: ['@chenglou/pretext'],
-  copy: [{ from: 'src/style.css', to: 'dist/style.css' }],
+  copy: [{ from: 'src/style.css', to: 'dist/' }],
 });

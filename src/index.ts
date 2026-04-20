@@ -152,9 +152,19 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   // Fire initial resize so consumer sizes PTY on connect.
   if (opts.onResize) opts.onResize(grid.cols, grid.rows);
 
-  // Click to focus.
-  const onClick = () => input.focus();
-  renderer.root.addEventListener('mousedown', onClick);
+  // Focus management. Click anywhere in the host refocuses the textarea so
+  // typing lands in the terminal. We skip refocus when the user has an active
+  // text selection (so copy works), and we use mouseup so native selection
+  // completes first.
+  const onMouseUp = () => {
+    const sel = typeof window !== 'undefined' ? window.getSelection() : null;
+    if (sel && sel.toString().length > 0) return;
+    input.focus();
+  };
+  el.addEventListener('mouseup', onMouseUp);
+
+  // Auto-focus on mount so users can type immediately.
+  input.focus();
 
   const term: Terminal = {
     write(data) {
@@ -173,7 +183,7 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     },
     destroy() {
       ro.disconnect();
-      renderer.root.removeEventListener('mousedown', onClick);
+      el.removeEventListener('mouseup', onMouseUp);
       input.destroy();
       renderer.destroy();
     },
@@ -203,14 +213,15 @@ function ensureBaseStyles(): void {
   document.head.appendChild(s);
 }
 
+// KEEP IN SYNC with src/style.css.
 const BASE_CSS = `
-.cloudterm{position:relative;width:100%;height:100%;background:var(--ct-bg,#0b0c10);color:var(--ct-fg,#e6e8eb);font-family:var(--ct-font,monospace);font-size:var(--ct-font-size,13px);line-height:1.4;overflow:hidden}
+.cloudterm{position:relative;width:100%;height:100%;background:var(--ct-bg,#0b0c10);color:var(--ct-fg,#e6e8eb);font-family:var(--ct-font,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace);font-size:var(--ct-font-size,13px);line-height:1.4;overflow:hidden;cursor:text}
 .cloudterm-viewport{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;contain:strict}
 .cloudterm-sizer{position:relative;width:1px}
 .cloudterm-surface{position:absolute;top:0;left:0;right:0}
 .cloudterm-line{position:absolute;left:0;right:0;white-space:pre;contain:content}
 .cloudterm-line span{white-space:pre}
-.cloudterm-cursor{position:absolute;background:var(--ct-cursor,#7cc4ff);opacity:.75;mix-blend-mode:difference}
-.cloudterm-input{position:absolute;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0;margin:0;resize:none;white-space:pre;overflow:hidden}
+.cloudterm-cursor{position:absolute;background:var(--ct-cursor,#7cc4ff);opacity:.4;mix-blend-mode:difference}
+.cloudterm-input{position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;margin:0;resize:none;white-space:pre;overflow:hidden;z-index:0;background:transparent;color:transparent;caret-color:transparent;outline:none}
 .cloudterm:focus-within .cloudterm-cursor{opacity:1}
 `;

@@ -1,13 +1,25 @@
 // Hidden textarea, keyboard + paste -> bytes.
 //
-// Design: the textarea is positioned offscreen but kept focusable.
-// We listen for keydown to map non-printable keys (arrows, enter, ctrl combos)
-// to ANSI escape sequences and emit via onData. Printable characters arrive
-// via 'input' event (better for IME + special layouts) and are emitted as UTF-8.
-// On paste we emit clipboard text as UTF-8.
+// The textarea overlays the full host at opacity:0. This matches xterm.js:
+// clicks land on it (so focus is natural), it captures all keyboard input,
+// and it is invisible. The visible terminal content sits beneath and is
+// painted by the renderer.
+//
+// keydown handles named/control keys and emits ANSI sequences.
+// input handles printable chars (and IME) as UTF-8.
+// paste handles clipboard text as UTF-8.
 
 export interface InputOpts {
   onData: (bytes: Uint8Array) => void;
+}
+
+// Minimal shape used by keyToBytes. Keeps the function testable without a DOM.
+export interface KeyLike {
+  key: string;
+  ctrlKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
+  metaKey: boolean;
 }
 
 const ENC = new TextEncoder();
@@ -16,22 +28,20 @@ function bytes(s: string): Uint8Array {
   return ENC.encode(s);
 }
 
-// Map a KeyboardEvent to bytes, or null if we should let the 'input' event handle it.
-function keyToBytes(e: KeyboardEvent): Uint8Array | null {
+// Map a KeyboardEvent-shaped object to bytes, or null if the 'input' event
+// path should handle it (printable chars, IME, etc.).
+export function keyToBytes(e: KeyLike): Uint8Array | null {
   const key = e.key;
   const ctrl = e.ctrlKey;
   const alt = e.altKey;
   const shift = e.shiftKey;
   const meta = e.metaKey;
 
-  // Allow copy / cmd shortcuts to pass through.
-  if (meta && !ctrl) {
-    // Don't swallow browser/os shortcuts (Cmd+C, Cmd+V, Cmd+A, etc.)
-    // Paste is handled by the 'paste' event.
-    return null;
-  }
+  // Let OS shortcuts (Cmd+C copy, Cmd+V paste, Cmd+A select-all) pass through.
+  // Paste is handled by the 'paste' event.
+  if (meta && !ctrl) return null;
 
-  // Named keys
+  // Named keys.
   switch (key) {
     case 'Enter':
       return bytes('\r');
@@ -58,6 +68,8 @@ function keyToBytes(e: KeyboardEvent): Uint8Array | null {
     case 'PageDown':
       return bytes('\x1b[6~');
     case 'Insert':
+      // Shift+Insert is the X11 paste shortcut. Let the browser 'paste' event handle it.
+      if (shift) return null;
       return bytes('\x1b[2~');
     case 'Delete':
       return bytes('\x1b[3~');
@@ -87,13 +99,12 @@ function keyToBytes(e: KeyboardEvent): Uint8Array | null {
       return bytes('\x1b[24~');
   }
 
-  // Ctrl + letter -> C0 control code (Ctrl+A = 0x01, Ctrl+Z = 0x1a)
+  // Ctrl + letter -> C0 control code (Ctrl+A = 0x01, Ctrl+Z = 0x1a).
   if (ctrl && !alt && !meta && key.length === 1) {
     const c = key.toLowerCase().charCodeAt(0);
     if (c >= 0x61 && c <= 0x7a) {
       return new Uint8Array([c - 0x60]);
     }
-    // Ctrl + [, \, ], ^, _
     switch (key) {
       case '[':
         return new Uint8Array([0x1b]);
@@ -110,12 +121,12 @@ function keyToBytes(e: KeyboardEvent): Uint8Array | null {
     }
   }
 
-  // Alt + printable -> ESC + char
+  // Alt + printable -> ESC + char.
   if (alt && !ctrl && !meta && key.length === 1) {
     return bytes('\x1b' + key);
   }
 
-  // Otherwise let the 'input' event deliver printable chars (covers IME).
+  // Let the 'input' event emit printable characters (handles IME correctly).
   return null;
 }
 
@@ -135,6 +146,7 @@ export class InputHandler {
     this.ta.setAttribute('autocapitalize', 'off');
     this.ta.setAttribute('spellcheck', 'false');
     this.ta.setAttribute('aria-label', 'Terminal');
+    this.ta.tabIndex = 0;
     parent.appendChild(this.ta);
 
     this.ta.addEventListener('keydown', this.boundKeydown);

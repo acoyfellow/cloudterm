@@ -1,5 +1,5 @@
 {
-  "name": "cloudterm",
+  "name": "@acoyfellow/cloudterm",
   "version": "0.0.1",
   "description": "Web terminal emulator. DOM-rendered. Built on @chenglou/pretext.",
   "author": "Jordan Coeyman <jordan@coey.dev>",

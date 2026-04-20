@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>cloudterm demo</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #0b0c10; color: #e6e8eb; font-family: system-ui, sans-serif; }
+      body { display: grid; grid-template-rows: auto 1fr; }
+      header { padding: 8px 12px; border-bottom: 1px solid #222; font-size: 13px; display: flex; gap: 12px; align-items: center; }
+      header button { background: #1a1c22; color: #e6e8eb; border: 1px solid #333; padding: 4px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
+      header button:hover { background: #242730; }
+      #term { width: 100%; height: 100%; }
+      .size { color: #888; font-size: 12px; margin-left: auto; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>cloudterm demo</strong>
+      <button id="write-sample">sample</button>
+      <button id="write-colors">colors</button>
+      <button id="write-256">256-color</button>
+      <button id="write-burst">10k lines</button>
+      <button id="clear">clear</button>
+      <span class="size" id="size"></span>
+    </header>
+    <div id="term"></div>
+
+    <script type="module">
+      import { mount } from '../src/index.ts';
+
+      const host = document.getElementById('term');
+      const sizeLabel = document.getElementById('size');
+
+      const term = await mount(host, {
+        onData: (bytes) => {
+          // Echo back with CRLF on Enter to simulate a shell.
+          const s = new TextDecoder().decode(bytes);
+          if (s === '\r') term.write('\r\n$ ');
+          else if (s === '\x7f') term.write('\b \b');
+          else term.write(s);
+        },
+        onResize: (cols, rows) => {
+          sizeLabel.textContent = `${cols} x ${rows}`;
+        },
+        onTitle: (t) => {
+          document.title = `cloudterm: ${t}`;
+        },
+      });
+
+      term.write('\x1b[1;32mcloudterm\x1b[0m v0.0.1\r\n');
+      term.write('DOM-rendered terminal on @chenglou/pretext.\r\n\r\n$ ');
+
+      document.getElementById('write-sample').onclick = () => {
+        term.write('\r\n\x1b]2;hello\x07');
+        term.write('\x1b[1mbold\x1b[0m \x1b[3mitalic\x1b[0m \x1b[4munderline\x1b[0m \x1b[7mreverse\x1b[0m\r\n');
+        term.write('\x1b[31mred\x1b[0m \x1b[32mgreen\x1b[0m \x1b[34mblue\x1b[0m \x1b[33myellow\x1b[0m\r\n$ ');
+      };
+
+      document.getElementById('write-colors').onclick = () => {
+        for (let i = 30; i < 38; i++) term.write(`\x1b[${i}m${i} `);
+        term.write('\x1b[0m\r\n');
+        for (let i = 90; i < 98; i++) term.write(`\x1b[${i}m${i} `);
+        term.write('\x1b[0m\r\n$ ');
+      };
+
+      document.getElementById('write-256').onclick = () => {
+        let s = '';
+        for (let i = 0; i < 256; i++) {
+          s += `\x1b[48;5;${i}m ${i.toString().padStart(3, ' ')} \x1b[0m`;
+          if ((i + 1) % 16 === 0) s += '\r\n';
+        }
+        term.write(s + '$ ');
+      };
+
+      document.getElementById('write-burst').onclick = () => {
+        let s = '';
+        for (let i = 0; i < 10000; i++) {
+          s += `line ${i} \x1b[36m${new Date().toISOString()}\x1b[0m\r\n`;
+        }
+        term.write(s + '$ ');
+      };
+
+      document.getElementById('clear').onclick = () => {
+        term.write('\x1b[2J\x1b[H$ ');
+      };
+
+      term.focus();
+    </script>
+  </body>
+</html>

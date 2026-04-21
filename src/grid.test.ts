@@ -183,6 +183,78 @@ describe('Grid alt-screen legacy modes', () => {
   });
 });
 
+describe('Grid DECCKM (application cursor mode)', () => {
+  test('default is false', () => {
+    const { grid } = makeTerm();
+    expect(grid.applicationCursorMode).toBe(false);
+  });
+
+  test('direct setter round-trip', () => {
+    const { grid } = makeTerm();
+    grid.setApplicationCursorMode(true);
+    expect(grid.applicationCursorMode).toBe(true);
+    grid.setApplicationCursorMode(false);
+    expect(grid.applicationCursorMode).toBe(false);
+  });
+
+  test('CSI ?1h sets, CSI ?1l clears', () => {
+    const { grid, write } = makeTerm();
+    expect(grid.applicationCursorMode).toBe(false);
+    write('\x1b[?1h');
+    expect(grid.applicationCursorMode).toBe(true);
+    write('\x1b[?1l');
+    expect(grid.applicationCursorMode).toBe(false);
+  });
+
+  test('CSI ?1 h/l does not move the cursor or mark dirty-for-render cells', () => {
+    // Pure input-side flag. Writing ?1h should not disturb cursor position
+    // or visible screen content, so vim toggling it mid-paint does no harm.
+    const { grid, write } = makeTerm(20, 5);
+    write('hello');
+    expect(grid.cursorCol).toBe(5);
+    const before = rowText(grid, 0);
+    write('\x1b[?1h');
+    expect(grid.cursorCol).toBe(5);
+    expect(rowText(grid, 0)).toBe(before);
+  });
+
+  test('1049 enter/exit does not reset DECCKM', () => {
+    // Alt-screen toggling and DECCKM are orthogonal modes. vim sets both on
+    // entry and unsets both on exit, but it does so via separate escape
+    // sequences. If the user sets ?1h, then some other app toggles the alt
+    // buffer without touching ?1, DECCKM must survive.
+    const { grid, write } = makeTerm();
+    write('\x1b[?1h');
+    expect(grid.applicationCursorMode).toBe(true);
+    write(ENTER_1049);
+    expect(grid.applicationCursorMode).toBe(true);
+    expect(grid.inAltScreen).toBe(true);
+    write(EXIT_1049);
+    expect(grid.applicationCursorMode).toBe(true);
+    expect(grid.inAltScreen).toBe(false);
+  });
+
+  test('DECCKM cleared while on alt-screen stays cleared after exit', () => {
+    const { grid, write } = makeTerm();
+    write('\x1b[?1h');
+    write(ENTER_1049);
+    write('\x1b[?1l');
+    expect(grid.applicationCursorMode).toBe(false);
+    write(EXIT_1049);
+    expect(grid.applicationCursorMode).toBe(false);
+  });
+
+  test('unknown private modes are still silently dropped', () => {
+    // Regression: adding ?1 handling must not alter behavior for unknown
+    // modes. Feeding e.g. ?25h (show cursor) or ?2004h (bracketed paste)
+    // should be a no-op for the DECCKM flag.
+    const { grid, write } = makeTerm();
+    write('\x1b[?25h');
+    write('\x1b[?2004h');
+    expect(grid.applicationCursorMode).toBe(false);
+  });
+});
+
 describe('Grid alt-screen renderer-facing surface', () => {
   test('totalLines and scrollback.length behave correctly in alt mode', () => {
     const { grid, write } = makeTerm(10, 4);

@@ -45,6 +45,11 @@ export interface ParserSink {
     enabled: boolean,
     opts: { save: boolean; clear: boolean; restore: boolean; swap: boolean },
   ): void;
+  // DECCKM (DEC private mode 1). When enabled, cursor keys emit `ESC O A/B/C/D`
+  // instead of `CSI A/B/C/D`. Set by full-screen apps (vim, less, tmux) so
+  // their bindings match the application form. Pure input-side state; does
+  // not affect rendering.
+  setApplicationCursorMode(enabled: boolean): void;
 }
 
 // State machine states
@@ -350,7 +355,9 @@ export class AnsiParser {
         if (!isPrivate) return;
         const enabled = final === 'h';
         for (const ps of this.params) {
-          if (ps === 47) {
+          if (ps === 1) {
+            this.sink.setApplicationCursorMode(enabled);
+          } else if (ps === 47) {
             this.sink.setAltScreen(enabled, {
               save: false,
               clear: false,

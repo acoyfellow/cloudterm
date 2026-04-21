@@ -134,11 +134,17 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
         grid.exitAltScreen(o.clear, o.restore);
       }
     },
+    setApplicationCursorMode(enabled) {
+      grid.setApplicationCursorMode(enabled);
+    },
   };
 
   const parser = new AnsiParser(sink);
 
-  const input = new InputHandler(renderer.root, { onData: opts.onData });
+  const input = new InputHandler(renderer.root, {
+    onData: opts.onData,
+    getApplicationCursorMode: () => grid.applicationCursorMode,
+  });
 
   // Schedule paints using rAF to batch bursts of writes.
   let rafPending = false;

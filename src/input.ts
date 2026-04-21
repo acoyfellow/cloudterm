@@ -17,6 +17,10 @@ import {
 
 export interface InputOpts {
   onData: (bytes: Uint8Array) => void;
+  // Read the current DECCKM state from the grid at each keydown. When true,
+  // plain arrow keys emit `ESC O A/B/C/D`; when false, `CSI A/B/C/D`. See
+  // xterm-keyboard.ts for the exact dispatch table.
+  getApplicationCursorMode?: () => boolean;
 }
 
 // Minimal shape used by keyToBytes. Keeps the function testable without a DOM.
@@ -47,10 +51,11 @@ function isMac(): boolean {
 // to the PTY, or null to let the browser handle the event (the 'input' event
 // path picks up printable chars / IME composition).
 //
-// TODO: thread applicationCursorMode through from Grid. The shell sets it via
-// DECSET `CSI ?1h` / `CSI ?1l` (vim, less, etc.). For now hardcoded false so
-// cursor keys emit the non-application form (`ESC [ A` vs `ESC O A`).
-export function keyToBytes(e: KeyLike): Uint8Array | null {
+// `applicationCursorMode` is DECCKM: when true (set by the shell via
+// `CSI ?1 h`, cleared by `CSI ?1 l`), plain arrow keys emit `ESC O A/B/C/D`
+// instead of `CSI A/B/C/D`. Modifier + arrow still uses the CSI form in both
+// modes (xterm behavior).
+export function keyToBytes(e: KeyLike, applicationCursorMode: boolean): Uint8Array | null {
   const ev: IKeyboardEvent = {
     key: e.key,
     keyCode: e.keyCode,
@@ -61,7 +66,7 @@ export function keyToBytes(e: KeyLike): Uint8Array | null {
     code: e.code ?? '',
     type: e.type ?? 'keydown',
   };
-  const result = evaluateKeyboardEvent(ev, false, isMac(), true);
+  const result = evaluateKeyboardEvent(ev, applicationCursorMode, isMac(), true);
   if (result.type !== KeyboardResultType.SEND_KEY) return null;
   if (!result.key) return null;
   return ENC.encode(result.key);
@@ -70,12 +75,14 @@ export function keyToBytes(e: KeyLike): Uint8Array | null {
 export class InputHandler {
   ta: HTMLTextAreaElement;
   private onData: (b: Uint8Array) => void;
+  private getAppCursor: () => boolean;
   private boundKeydown = this.onKeydown.bind(this);
   private boundInput = this.onInput.bind(this);
   private boundPaste = this.onPaste.bind(this);
 
   constructor(parent: HTMLElement, opts: InputOpts) {
     this.onData = opts.onData;
+    this.getAppCursor = opts.getApplicationCursorMode ?? (() => false);
     this.ta = document.createElement('textarea');
     this.ta.className = 'cloudterm-input';
     this.ta.setAttribute('autocomplete', 'off');
@@ -96,7 +103,7 @@ export class InputHandler {
   }
 
   private onKeydown(e: KeyboardEvent): void {
-    const out = keyToBytes(e);
+    const out = keyToBytes(e, this.getAppCursor());
     if (out) {
       e.preventDefault();
       this.onData(out);

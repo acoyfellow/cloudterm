@@ -58,6 +58,11 @@ export class Grid {
   private altReturnRow = 0;
   private altReturnCol = 0;
 
+  // DECCKM (CSI ?1 h/l). Purely input-side: when true, InputHandler emits
+  // `ESC O A/B/C/D` for plain arrow keys instead of `CSI A/B/C/D`. Independent
+  // of alt-screen state (1049 does not reset this).
+  applicationCursorMode = false;
+
   dirty = true;
 
   constructor(cols: number, rows: number, maxScrollback = 10_000) {
@@ -330,5 +335,10 @@ export class Grid {
 
   private blankBuffer(buf: Cell[][]): void {
     for (let r = 0; r < buf.length; r++) buf[r] = makeRow(this.cols);
+  }
+
+  // DECCKM setter. No dirty flag: input-only, renderer doesn't care.
+  setApplicationCursorMode(enabled: boolean): void {
+    this.applicationCursorMode = enabled;
   }
 }

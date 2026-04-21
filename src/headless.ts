@@ -130,6 +130,9 @@ export function createHeadless(
         grid.exitAltScreen(o.clear, o.restore);
       }
     },
+    setApplicationCursorMode(enabled) {
+      grid.setApplicationCursorMode(enabled);
+    },
   };
 
   const parser = new AnsiParser(sink);

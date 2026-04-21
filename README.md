@@ -1,29 +1,48 @@
 # cloudterm
 
-Web terminal emulator. DOM-rendered. Built on @chenglou/pretext.
+Web terminal emulator. DOM-rendered. One dependency.
+
+## Install
 
 ```sh
-bun add cloudterm
+bun add github:acoyfellow/cloudterm#v0.0.3
 ```
+
+## Use
 
 ```ts
 import { mount } from 'cloudterm';
+import 'cloudterm/style.css';
 
 const term = await mount(el, { onData: (b) => ws.send(b) });
 ws.onmessage = (e) => term.write(e.data);
 ```
 
-Status: v0.0.1. Minimal by design.
-
 ## Properties
 
 | | |
 |---|---|
-| Renderer | DOM (`<span>`-based, pretext-measured) |
-| Parser | Homegrown ANSI / CSI / OSC |
+| Renderer | DOM (`<span>` runs, pretext-measured, line-virtualized) |
+| Parser | Homegrown ANSI / CSI / OSC state machine |
+| Keyboard | Ported from xterm.js `evaluateKeyboardEvent` |
 | Dependencies | 1 (@chenglou/pretext) |
-| Bundle size | target under 20KB gz |
+| Bundle | 21 KB raw, 6.7 KB gz |
 | License | MIT |
+
+## How it works
+
+Input goes `textarea -> keydown -> evaluateKeyboardEvent -> onData bytes`. A hidden textarea overlays the host at `opacity:0` so clicks focus naturally and the browser gives us `input`, `keydown`, `paste` for free.
+
+Output goes `write(bytes) -> ANSI parser -> Grid (cells + scrollback) -> DomRenderer -> rAF paint`. The renderer only paints visible lines plus an overscan band; line height and char width come from `@chenglou/pretext` at mount time (avoids `getBoundingClientRect` reflow).
+
+```
+  ┌─ input path ─────────────────────────────┐    ┌─ output path ──────────────────────┐
+  │  textarea.keydown                        │    │  write(data)                       │
+  │     → evaluateKeyboardEvent (xterm port) │    │     → AnsiParser (CSI/OSC/SGR)     │
+  │     → MountOptions.onData(Uint8Array)    │    │     → Grid (cells, scrollback)     │
+  │     → you send to PTY / WebSocket        │    │     → DomRenderer.paint() on rAF   │
+  └──────────────────────────────────────────┘    └────────────────────────────────────┘
+```
 
 ## API
 
@@ -56,15 +75,9 @@ interface Theme {
 }
 ```
 
-`mount` is async: it waits for fonts to load and the host element to have a measurable size before resolving.
+`mount` is async. It waits for fonts and a measurable host element before resolving.
 
-## Styles
-
-Base styles are injected automatically. To override without `!important`, import the stylesheet and theme via CSS variables:
-
-```ts
-import 'cloudterm/style.css';
-```
+## Theme via CSS variables
 
 ```css
 .cloudterm {
@@ -87,36 +100,36 @@ import 'cloudterm/style.css';
 | C0 | BS, HT, LF/VT/FF, CR, BEL |
 | OSC | 0, 1, 2 (window title) |
 
-## Keyboard
-
-Keyboard handling is ported from xterm.js (`evaluateKeyboardEvent`, MIT). Full xterm modifier encoding: Shift (+1), Alt (+2), Ctrl (+4), Meta (+8), combined via `CSI 1;N <direction>`. Covers:
+## Supported keys
 
 | Combo | Emits |
 |---|---|
-| Ctrl+Left / Ctrl+Right | `CSI 1;5D` / `CSI 1;5C` — word jump in zsh/bash |
-| Shift+arrow | `CSI 1;2<dir>` — selection extend |
-| Alt+B / Alt+F | `ESC b` / `ESC f` — readline word jump |
-| Ctrl+A-Z | C0 control codes — full readline control set |
-| F1-F12 + modifiers | SS3 / CSI form per xterm spec, 96 combinations |
-| Cmd+A / Cmd+C / Cmd+V | passed to browser (select-all, copy, paste) |
+| Ctrl+Left / Ctrl+Right | `CSI 1;5D` / `CSI 1;5C` |
+| Shift+Arrow | `CSI 1;2<dir>` |
+| Alt+B / Alt+F | `ESC b` / `ESC f` |
+| Ctrl+A through Ctrl+Z | C0 0x01 through 0x1a |
+| F1-F12 with any modifier | SS3 / CSI form, 96 combinations |
+| Home / End / PageUp / PageDown / Insert / Delete | per xterm spec |
+| Cmd+A / Cmd+C / Cmd+V | null (browser handles) |
 
-Application cursor mode (DECCKM) is not yet threaded from parser to input — TODO. Cursor keys currently emit the non-application form only.
+## Not included
 
-## What's not included
-
-- No canvas/WebGL renderer
-- No transport (bring your own WebSocket / PTY)
+- No canvas or WebGL renderer
+- No transport (bring your own WebSocket or PTY)
 - No framework wrappers
 - No addon system
-- No mouse reporting or alt-screen switching
+- No mouse reporting
+- No alternate-screen switching
 - No link detection
 - No built-in selection (browser handles it)
+- No DECCKM application cursor mode (TODO)
 
 ## Related
 
-- [termlab.coey.dev](https://termlab.coey.dev) — side-by-side terminal benchmark, cloudterm in the grid
-- [@chenglou/pretext](https://github.com/chenglou/pretext) — text measurement foundation
+- [termlab.coey.dev](https://termlab.coey.dev) - cloudterm in a live side-by-side benchmark
+- [@chenglou/pretext](https://github.com/chenglou/pretext) - text measurement foundation
+- [xterm.js](https://github.com/xtermjs/xterm.js) - keyboard handling ported from here
 
 ## License
 
-MIT.
+MIT. See `LICENSE` for xterm.js attribution on the ported keyboard module.

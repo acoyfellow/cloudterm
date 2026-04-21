@@ -251,6 +251,16 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     getApplicationCursorMode: () => grid.applicationCursorMode,
     predict: predictions
       ? (ev) => {
+          // TEMPORARY DIAGNOSTIC: remove after the speculative-echo
+          // deploy is confirmed working end-to-end.
+          if (typeof (globalThis as { __cloudtermPredictDebug?: boolean }).__cloudtermPredictDebug !== 'undefined') {
+            console.log('[cloudterm-predict]', ev, {
+              allowed: predictionAllowed(),
+              altScreen: grid.inAltScreen,
+              appCursor: grid.applicationCursorMode,
+              size: predictions.size,
+            });
+          }
           if (!predictionAllowed()) return;
           const now = performance.now();
           predictions.prune(now);

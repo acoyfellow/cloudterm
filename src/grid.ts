@@ -48,6 +48,16 @@ export class Grid {
   private savedRow = 0;
   private savedCol = 0;
 
+  // Alternate screen buffer state. When inAltScreen is true, `screen` points
+  // at the alt buffer and `scrollback` is an empty array. The main-screen
+  // buffer + real scrollback are stashed in the `main*` fields until exit.
+  inAltScreen = false;
+  private altScreen: Cell[][] = [];
+  private mainScreen: Cell[][] = [];
+  private mainScrollback: Cell[][] = [];
+  private altReturnRow = 0;
+  private altReturnCol = 0;
+
   dirty = true;
 
   constructor(cols: number, rows: number, maxScrollback = 10_000) {
@@ -55,6 +65,7 @@ export class Grid {
     this.rows = Math.max(1, rows);
     this.maxScrollback = Math.max(0, maxScrollback);
     this.screen = Array.from({ length: this.rows }, () => makeRow(this.cols));
+    this.altScreen = Array.from({ length: this.rows }, () => makeRow(this.cols));
   }
 
   resize(cols: number, rows: number): void {
@@ -62,26 +73,13 @@ export class Grid {
     rows = Math.max(1, rows);
     if (cols === this.cols && rows === this.rows) return;
 
-    // Naive: resize each row to new cols.
-    for (const row of this.screen) {
-      if (row.length < cols) {
-        for (let i = row.length; i < cols; i++) row.push(blankCell());
-      } else if (row.length > cols) {
-        row.length = cols;
-      }
-    }
-    // Adjust row count
-    if (this.screen.length < rows) {
-      while (this.screen.length < rows) this.screen.push(makeRow(cols));
-    } else if (this.screen.length > rows) {
-      // Push excess top rows into scrollback
-      const drop = this.screen.length - rows;
-      for (let i = 0; i < drop; i++) {
-        const r = this.screen.shift();
-        if (r) this.pushScrollback(r);
-      }
-    }
-    // Also make sure scrollback rows respect new cols (optional, keep stable).
+    // Resize whichever buffer is currently active.
+    this.resizeBuffer(this.screen, cols, rows, /*pushExcess*/ true);
+    // Resize the inactive buffer too, so a later swap sees correct shape.
+    // No scrollback push for the inactive buffer.
+    const inactive = this.inAltScreen ? this.mainScreen : this.altScreen;
+    if (inactive.length) this.resizeBuffer(inactive, cols, rows, /*pushExcess*/ false);
+
     this.cols = cols;
     this.rows = rows;
     if (this.cursorRow >= rows) this.cursorRow = rows - 1;
@@ -89,7 +87,34 @@ export class Grid {
     this.dirty = true;
   }
 
+  private resizeBuffer(
+    buf: Cell[][],
+    cols: number,
+    rows: number,
+    pushExcess: boolean,
+  ): void {
+    for (const row of buf) {
+      if (row.length < cols) {
+        for (let i = row.length; i < cols; i++) row.push(blankCell());
+      } else if (row.length > cols) {
+        row.length = cols;
+      }
+    }
+    if (buf.length < rows) {
+      while (buf.length < rows) buf.push(makeRow(cols));
+    } else if (buf.length > rows) {
+      const drop = buf.length - rows;
+      for (let i = 0; i < drop; i++) {
+        const r = buf.shift();
+        if (r && pushExcess) this.pushScrollback(r);
+      }
+    }
+  }
+
   private pushScrollback(row: Cell[]): void {
+    // Alt-screen content never enters scrollback. Application-level scrolling
+    // inside less, vim, tmux, etc. must not leak into the user's history.
+    if (this.inAltScreen) return;
     if (this.maxScrollback === 0) return;
     this.scrollback.push(row);
     if (this.scrollback.length > this.maxScrollback) {
@@ -231,5 +256,79 @@ export class Grid {
   clearScrollback(): void {
     this.scrollback = [];
     this.dirty = true;
+  }
+
+  // Alternate screen buffer support (xterm DEC private modes 47/1047/1048/1049).
+  //
+  // enter(save, clear): switch to alt. If save, stash cursor for later restore.
+  // If clear, blank the alt buffer on entry.
+  // exit(clear, restore): switch back. If clear, blank alt before swap. If
+  // restore, put cursor back where it was when we entered.
+  //
+  // 1049 = enter(save=true, clear=true), exit(clear=true, restore=true).
+  // 1047 = enter(save=false, clear=false), exit(clear=true, restore=false).
+  //   47  = enter(save=false, clear=false), exit(clear=false, restore=false).
+
+  enterAltScreen(save: boolean, clear: boolean): void {
+    if (this.inAltScreen) {
+      if (clear) this.blankBuffer(this.screen);
+      if (save) {
+        this.altReturnRow = this.cursorRow;
+        this.altReturnCol = this.cursorCol;
+      }
+      this.dirty = true;
+      return;
+    }
+    if (save) {
+      this.altReturnRow = this.cursorRow;
+      this.altReturnCol = this.cursorCol;
+    }
+    // Stash main, swap alt in.
+    this.mainScreen = this.screen;
+    this.mainScrollback = this.scrollback;
+    this.screen = this.altScreen;
+    this.scrollback = [];
+    this.inAltScreen = true;
+    if (clear) this.blankBuffer(this.screen);
+    this.dirty = true;
+  }
+
+  exitAltScreen(clear: boolean, restore: boolean): void {
+    if (!this.inAltScreen) {
+      if (restore) {
+        this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));
+        this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.altReturnCol));
+        this.dirty = true;
+      }
+      return;
+    }
+    if (clear) this.blankBuffer(this.screen);
+    // Swap back.
+    this.altScreen = this.screen;
+    this.screen = this.mainScreen;
+    this.scrollback = this.mainScrollback;
+    this.mainScreen = [];
+    this.mainScrollback = [];
+    this.inAltScreen = false;
+    if (restore) {
+      this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));
+      this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.altReturnCol));
+    }
+    this.dirty = true;
+  }
+
+  // Save/restore cursor pair used by CSI ?1048. Independent of the buffer swap.
+  saveCursorAlt(): void {
+    this.altReturnRow = this.cursorRow;
+    this.altReturnCol = this.cursorCol;
+  }
+  restoreCursorAlt(): void {
+    this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));
+    this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.altReturnCol));
+    this.dirty = true;
+  }
+
+  private blankBuffer(buf: Cell[][]): void {
+    for (let r = 0; r < buf.length; r++) buf[r] = makeRow(this.cols);
   }
 }

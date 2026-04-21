@@ -38,6 +38,13 @@ export interface ParserSink {
   restoreCursor(): void;
   setAttr(attr: CellAttr): void;
   title(t: string): void;
+  // Alternate screen buffer (DEC private modes 47, 1047, 1048, 1049).
+  // enabled=true on `h` (set), false on `l` (reset). Flags encode the
+  // per-mode behavior: save/restore cursor, clear buffer, perform swap.
+  setAltScreen(
+    enabled: boolean,
+    opts: { save: boolean; clear: boolean; restore: boolean; swap: boolean },
+  ): void;
 }
 
 // State machine states
@@ -225,6 +232,12 @@ export class AnsiParser {
       this.currentParam = -1;
       return;
     }
+    if (code >= 0x3c && code <= 0x3f) {
+      // Private-mode prefix byte (<, =, >, ?). Must appear before any digits.
+      // Store as intermediate so dispatch can detect it.
+      this.intermediate += ch;
+      return;
+    }
     if (code >= 0x20 && code <= 0x2f) {
       // intermediate (space through /)
       this.intermediate += ch;
@@ -328,9 +341,47 @@ export class AnsiParser {
         if (!isPrivate) this.handleSgr();
         return;
       case 'h':
-      case 'l':
-        // mode set/reset — v1: ignore (no alt-screen)
+      case 'l': {
+        // DEC private modes. Only alt-screen variants handled here.
+        //   47   swap only
+        //   1047 swap + clear on exit
+        //   1048 save/restore cursor only, no swap
+        //   1049 save cursor + swap + clear, restore on exit
+        if (!isPrivate) return;
+        const enabled = final === 'h';
+        for (const ps of this.params) {
+          if (ps === 47) {
+            this.sink.setAltScreen(enabled, {
+              save: false,
+              clear: false,
+              restore: false,
+              swap: true,
+            });
+          } else if (ps === 1047) {
+            this.sink.setAltScreen(enabled, {
+              save: false,
+              clear: !enabled, // clear alt on exit
+              restore: false,
+              swap: true,
+            });
+          } else if (ps === 1048) {
+            this.sink.setAltScreen(enabled, {
+              save: enabled,
+              clear: false,
+              restore: !enabled,
+              swap: false,
+            });
+          } else if (ps === 1049) {
+            this.sink.setAltScreen(enabled, {
+              save: enabled, // save on enter
+              clear: true, // clear alt on both enter and exit
+              restore: !enabled, // restore on exit
+              swap: true,
+            });
+          }
+        }
         return;
+      }
       case 's':
         this.sink.saveCursor();
         return;

@@ -121,6 +121,19 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     title(t) {
       if (opts.onTitle) opts.onTitle(t);
     },
+    setAltScreen(enabled, o) {
+      if (!o.swap) {
+        // 1048 path: cursor save/restore without a buffer swap.
+        if (enabled && o.save) grid.saveCursorAlt();
+        if (!enabled && o.restore) grid.restoreCursorAlt();
+        return;
+      }
+      if (enabled) {
+        grid.enterAltScreen(o.save, o.clear);
+      } else {
+        grid.exitAltScreen(o.clear, o.restore);
+      }
+    },
   };
 
   const parser = new AnsiParser(sink);

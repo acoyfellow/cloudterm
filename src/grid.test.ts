@@ -246,13 +246,56 @@ describe('Grid DECCKM (application cursor mode)', () => {
   });
 
   test('unknown private modes are still silently dropped', () => {
-    // Regression: adding ?1 handling must not alter behavior for unknown
-    // modes. Feeding e.g. ?25h (show cursor) or ?2004h (bracketed paste)
-    // should be a no-op for the DECCKM flag.
+    // Regression: adding ?1 handling must not alter behavior for other
+    // modes. Feeding e.g. ?25h (show cursor) should be a no-op for DECCKM.
     const { grid, write } = makeTerm();
     write('\x1b[?25h');
-    write('\x1b[?2004h');
     expect(grid.applicationCursorMode).toBe(false);
+  });
+});
+
+describe('Grid bracketed paste mode (DEC 2004)', () => {
+  test('default is false', () => {
+    const { grid } = makeTerm();
+    expect(grid.bracketedPasteMode).toBe(false);
+  });
+
+  test('direct setter round-trip', () => {
+    const { grid } = makeTerm();
+    grid.setBracketedPaste(true);
+    expect(grid.bracketedPasteMode).toBe(true);
+    grid.setBracketedPaste(false);
+    expect(grid.bracketedPasteMode).toBe(false);
+  });
+
+  test('CSI ?2004h sets, CSI ?2004l clears', () => {
+    const { grid, write } = makeTerm();
+    expect(grid.bracketedPasteMode).toBe(false);
+    write('\x1b[?2004h');
+    expect(grid.bracketedPasteMode).toBe(true);
+    write('\x1b[?2004l');
+    expect(grid.bracketedPasteMode).toBe(false);
+  });
+
+  test('CSI ?2004h does not move the cursor or disturb visible cells', () => {
+    const { grid, write } = makeTerm(20, 5);
+    write('hello');
+    const before = rowText(grid, 0);
+    const col = grid.cursorCol;
+    write('\x1b[?2004h');
+    expect(grid.cursorCol).toBe(col);
+    expect(rowText(grid, 0)).toBe(before);
+  });
+
+  test('bracketed paste and DECCKM are independent modes', () => {
+    const { grid, write } = makeTerm();
+    write('\x1b[?1h');
+    write('\x1b[?2004h');
+    expect(grid.applicationCursorMode).toBe(true);
+    expect(grid.bracketedPasteMode).toBe(true);
+    write('\x1b[?2004l');
+    expect(grid.applicationCursorMode).toBe(true);
+    expect(grid.bracketedPasteMode).toBe(false);
   });
 });
 

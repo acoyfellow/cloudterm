@@ -83,6 +83,11 @@ export class Grid {
   // of alt-screen state (1049 does not reset this).
   applicationCursorMode = false;
 
+  // Bracketed paste (CSI ?2004 h/l). Purely input-side: when true, pasted
+  // text from the clipboard is wrapped with ESC [ 200 ~ and ESC [ 201 ~ so
+  // the shell can distinguish it from keystrokes. No rendering effect.
+  bracketedPasteMode = false;
+
   dirty = true;
   dirtyAll = true;
   dirtyLines = new Set<number>();
@@ -453,5 +458,10 @@ export class Grid {
   // DECCKM setter. No dirty flag: input-only, renderer doesn't care.
   setApplicationCursorMode(enabled: boolean): void {
     this.applicationCursorMode = enabled;
+  }
+
+  // Bracketed paste setter. No dirty flag: input-only, renderer doesn't care.
+  setBracketedPaste(enabled: boolean): void {
+    this.bracketedPasteMode = enabled;
   }
 }

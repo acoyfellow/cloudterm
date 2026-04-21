@@ -31,6 +31,8 @@ export interface Headless {
   resize(cols: number, rows: number): void;
   /** Collected OSC titles, in arrival order. */
   titles: string[];
+  /** Collected OSC 7 current-directory URIs, in arrival order. */
+  cwds: string[];
   /** Bell count. */
   bells: number;
 }
@@ -47,6 +49,7 @@ export function createHeadless(
   const grid = new Grid(cols, rows, opts.maxScrollback ?? 10_000);
   let currentAttr: CellAttr = defaultAttr();
   const titles: string[] = [];
+  const cwds: string[] = [];
   let bells = 0;
 
   const sink: ParserSink = {
@@ -133,6 +136,12 @@ export function createHeadless(
     setApplicationCursorMode(enabled) {
       grid.setApplicationCursorMode(enabled);
     },
+    setBracketedPaste(enabled) {
+      grid.setBracketedPaste(enabled);
+    },
+    setCurrentDirectory(uri) {
+      cwds.push(uri);
+    },
   };
 
   const parser = new AnsiParser(sink);
@@ -153,6 +162,7 @@ export function createHeadless(
       grid.resize(c, r);
     },
     titles,
+    cwds,
     get bells() {
       return bells;
     },

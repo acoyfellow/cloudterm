@@ -11,8 +11,9 @@ import { scenario as vim } from './scenarios/vim.js';
 import { scenario as less } from './scenarios/less.js';
 import { scenario as htop } from './scenarios/htop.js';
 import { scenario as tmux } from './scenarios/tmux.js';
+import { scenario as heavyOutput } from './scenarios/heavy-output.js';
 
-const scenarios = [basic, vim, less, htop, tmux];
+const scenarios = [basic, vim, less, heavyOutput, htop, tmux];
 
 function statusTag(r: ScenarioResult): string {
   if (r.skipped) return 'SKIP';
@@ -96,7 +97,7 @@ async function main() {
   console.log('');
 
   for (const s of scenarios) {
-    const line = `> ${s.name.padEnd(8)}`;
+    const line = `> ${s.name.padEnd(14)}`;
     process.stdout.write(line);
     const r = await runScenario(s);
     results.push(r);

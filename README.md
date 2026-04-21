@@ -99,7 +99,7 @@ interface Theme {
 | Erase | ED (0/1/2/3), EL (0/1/2) |
 | Scroll | SU, SD |
 | C0 | BS, HT, LF/VT/FF, CR, BEL |
-| OSC | 0, 1, 2 (window title) |
+| OSC | 0, 1, 2 (window title), 7 (current working directory) |
 
 ## Supported keys
 

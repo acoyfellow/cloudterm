@@ -50,6 +50,14 @@ export interface ParserSink {
   // their bindings match the application form. Pure input-side state; does
   // not affect rendering.
   setApplicationCursorMode(enabled: boolean): void;
+  // DEC private mode 2004 (bracketed paste). When enabled, client-side paste
+  // wraps pasted text with `ESC [ 200 ~` and `ESC [ 201 ~` so the shell can
+  // distinguish it from typed input. Pure input-side state.
+  setBracketedPaste(enabled: boolean): void;
+  // OSC 7. The shell reports its current working directory as a `file://` URI
+  // (e.g. `file://host/home/user`). Consumers typically surface this in a tab
+  // title, a breadcrumb, or to spawn new tabs in the same cwd.
+  setCurrentDirectory(uri: string): void;
 }
 
 // State machine states
@@ -255,7 +263,7 @@ export class AnsiParser {
   }
 
   private dispatchOsc(): void {
-    // Format "Ps;Pt". We only care about 0 and 2 (set title).
+    // Format "Ps;Pt". Handled: 0/1/2 (window title), 7 (current working dir).
     const buf = this.oscBuf;
     this.oscBuf = '';
     const idx = buf.indexOf(';');
@@ -267,6 +275,8 @@ export class AnsiParser {
     const pt = buf.slice(idx + 1);
     if (ps === '0' || ps === '2' || ps === '1') {
       this.sink.title(pt);
+    } else if (ps === '7') {
+      this.sink.setCurrentDirectory(pt);
     }
     this.state = S_GROUND;
   }
@@ -364,6 +374,8 @@ export class AnsiParser {
               restore: !enabled, // restore on exit
               swap: true,
             });
+          } else if (ps === 2004) {
+            this.sink.setBracketedPaste(enabled);
           }
         }
         return;

@@ -21,6 +21,10 @@ export interface InputOpts {
   // plain arrow keys emit `ESC O A/B/C/D`; when false, `CSI A/B/C/D`. See
   // xterm-keyboard.ts for the exact dispatch table.
   getApplicationCursorMode?: () => boolean;
+  // Read the current bracketed-paste state from the grid at each paste. When
+  // true, pasted text is wrapped with ESC [ 200 ~ and ESC [ 201 ~ so the
+  // shell can distinguish it from typed input.
+  getBracketedPasteMode?: () => boolean;
   // Speculative local-echo hook. Fires alongside onData for keys that have a
   // predictable visual effect at the cursor: printable chars and backspace.
   // Arrow keys, function keys, control combos, and modifier-only keys do not
@@ -81,6 +85,18 @@ export function keyToPrediction(e: KeyLike): PredictEvent | null {
   return { kind: 'char', ch: e.key };
 }
 
+// Encode pasted clipboard text into bytes to send to the PTY. When bracketed
+// paste is enabled, wrap with ESC [ 200 ~ and ESC [ 201 ~ so the shell can
+// distinguish paste from typed input. Strip any embedded bracketed-paste
+// markers from the clipboard content first: a malicious terminal stream
+// copied to the clipboard could otherwise inject an `ESC [ 201 ~` that ends
+// the bracket prematurely and lets the rest run as keystrokes.
+export function pasteToBytes(text: string, bracketedPasteMode: boolean): Uint8Array {
+  if (!bracketedPasteMode) return ENC.encode(text);
+  const safe = text.split('\x1b[200~').join('').split('\x1b[201~').join('');
+  return ENC.encode('\x1b[200~' + safe + '\x1b[201~');
+}
+
 export function keyToBytes(e: KeyLike, applicationCursorMode: boolean): Uint8Array | null {
   const ev: IKeyboardEvent = {
     key: e.key,
@@ -102,6 +118,7 @@ export class InputHandler {
   ta: HTMLTextAreaElement;
   private onData: (b: Uint8Array) => void;
   private getAppCursor: () => boolean;
+  private getBracketedPaste: () => boolean;
   private predict: ((e: PredictEvent) => void) | null;
   private boundKeydown = this.onKeydown.bind(this);
   private boundInput = this.onInput.bind(this);
@@ -110,6 +127,7 @@ export class InputHandler {
   constructor(parent: HTMLElement, opts: InputOpts) {
     this.onData = opts.onData;
     this.getAppCursor = opts.getApplicationCursorMode ?? (() => false);
+    this.getBracketedPaste = opts.getBracketedPasteMode ?? (() => false);
     this.predict = opts.predict ?? null;
     this.ta = document.createElement('textarea');
     this.ta.className = 'cloudterm-input';
@@ -170,10 +188,9 @@ export class InputHandler {
     const text = e.clipboardData?.getData('text');
     if (text && text.length) {
       e.preventDefault();
-      this.onData(ENC.encode(text));
-      // Intentionally no prediction: shells may rate-limit, inject bracketed
-      // paste sequences, or mangle pasted content. Let the server's echo be
-      // authoritative.
+      this.onData(pasteToBytes(text, this.getBracketedPaste()));
+      // No prediction: shells may rate-limit, wrap in bracketed paste, or
+      // mangle pasted content. Let the server's echo be authoritative.
     }
   }
 

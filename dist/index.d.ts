@@ -13,6 +13,7 @@ interface MountOptions {
   onData: (data: Uint8Array) => void;
   onResize?: (cols: number, rows: number) => void;
   onTitle?: (title: string) => void;
+  onCwd?: (uri: string) => void;
   theme?: Partial<Theme>;
   maxScrollback?: number;
   predictionMode?: 'off' | 'auto';

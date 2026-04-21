@@ -13,6 +13,9 @@ export interface MountOptions {
   onData: (data: Uint8Array) => void;
   onResize?: (cols: number, rows: number) => void;
   onTitle?: (title: string) => void;
+  // Fires when the shell reports a new working directory via OSC 7. The URI
+  // is a `file://` URL (e.g. `file://host/home/user`). No-op if unset.
+  onCwd?: (uri: string) => void;
   theme?: Partial<Theme>;
   maxScrollback?: number;
   // Speculative local echo. 'auto' (default) paints predicted characters as
@@ -195,6 +198,12 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
       // Apps that use DECCKM (vim, less) do not local-echo typed keys.
       if (predictions) predictions.clear();
     },
+    setBracketedPaste(enabled) {
+      grid.setBracketedPaste(enabled);
+    },
+    setCurrentDirectory(uri) {
+      if (opts.onCwd) opts.onCwd(uri);
+    },
   };
 
   const parser = new AnsiParser(sink);
@@ -249,6 +258,7 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   const input = new InputHandler(renderer.root, {
     onData: opts.onData,
     getApplicationCursorMode: () => grid.applicationCursorMode,
+    getBracketedPasteMode: () => grid.bracketedPasteMode,
     predict: predictions
       ? (ev) => {
           if (!predictionAllowed()) return;

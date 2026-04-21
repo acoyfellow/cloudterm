@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { keyToBytes, keyToPrediction, type KeyLike } from './input.js';
+import { keyToBytes, keyToPrediction, pasteToBytes, type KeyLike } from './input.js';
 
 // Helper: build a KeyLike fixture. Pass key + keyCode + optional modifiers.
 // Defaults match what a real KeyboardEvent has for unset properties.

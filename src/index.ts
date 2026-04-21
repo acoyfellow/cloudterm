@@ -199,16 +199,16 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
 
   const parser = new AnsiParser(sink);
 
-  // Decide if speculation is safe at the moment the user pressed a key.
-  // Full-screen TUIs (alt-screen) and readline replacements (DECCKM) do not
-  // echo typed keys as glyphs at the cursor, so predicting is worse than
-  // not predicting.
-  const predictionAllowed = (): boolean => {
-    if (!predictions) return false;
-    if (grid.inAltScreen) return false;
-    if (grid.applicationCursorMode) return false;
-    return true;
-  };
+  // Speculation always fires when enabled. Originally this gate suppressed
+  // prediction in alt-screen or DECCKM on the theory that full-screen TUIs
+  // do not local-echo typed keys. That theory is wrong for the common case
+  // where the outer shell itself runs inside tmux (cloudshell does): tmux
+  // sets alt-screen for its own lifetime, so suppression meant prediction
+  // never fired at the interactive prompt. Reconciliation already handles
+  // the "server did not echo what I predicted" case by dropping the whole
+  // queue on mismatch, so the worst an over-aggressive prediction does is
+  // flash a glyph that gets overwritten within the existing render window.
+  const predictionAllowed = (): boolean => predictions !== null;
 
   // When the user types with nothing to reconcile against (e.g. a password
   // prompt where the shell has `stty -echo`), stale predictions would sit
@@ -251,16 +251,6 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     getApplicationCursorMode: () => grid.applicationCursorMode,
     predict: predictions
       ? (ev) => {
-          // TEMPORARY DIAGNOSTIC: remove after the speculative-echo
-          // deploy is confirmed working end-to-end.
-          if (typeof (globalThis as { __cloudtermPredictDebug?: boolean }).__cloudtermPredictDebug !== 'undefined') {
-            console.log('[cloudterm-predict]', ev, {
-              allowed: predictionAllowed(),
-              altScreen: grid.inAltScreen,
-              appCursor: grid.applicationCursorMode,
-              size: predictions.size,
-            });
-          }
           if (!predictionAllowed()) return;
           const now = performance.now();
           predictions.prune(now);

@@ -21,7 +21,16 @@ export interface InputOpts {
   // plain arrow keys emit `ESC O A/B/C/D`; when false, `CSI A/B/C/D`. See
   // xterm-keyboard.ts for the exact dispatch table.
   getApplicationCursorMode?: () => boolean;
+  // Speculative local-echo hook. Fires alongside onData for keys that have a
+  // predictable visual effect at the cursor: printable chars and backspace.
+  // Arrow keys, function keys, control combos, and modifier-only keys do not
+  // fire this. Pasted text also does not fire this (too easy to be wrong).
+  predict?: (event: PredictEvent) => void;
 }
+
+export type PredictEvent =
+  | { kind: 'char'; ch: string }
+  | { kind: 'backspace' };
 
 // Minimal shape used by keyToBytes. Keeps the function testable without a DOM.
 // Mirrors the subset of `KeyboardEvent` that xterm.js's evaluateKeyboardEvent
@@ -55,6 +64,23 @@ function isMac(): boolean {
 // `CSI ?1 h`, cleared by `CSI ?1 l`), plain arrow keys emit `ESC O A/B/C/D`
 // instead of `CSI A/B/C/D`. Modifier + arrow still uses the CSI form in both
 // modes (xterm behavior).
+// Decide if a keyboard event should fire a local-echo prediction, and what
+// kind. Returns null when the event has no predictable visual effect at the
+// current cursor (arrows, function keys, control combos, modifier-only,
+// anything with Ctrl/Alt/Meta). Kept as a pure function so it is testable
+// without a DOM: InputHandler.onKeydown calls this immediately after
+// keyToBytes.
+export function keyToPrediction(e: KeyLike): PredictEvent | null {
+  // Any Ctrl/Meta combo bails. Alt also bails: Alt+letter is a readline
+  // escape (word-jump, yank-last-arg), not a visible echo at cursor.
+  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+  if (e.key === 'Backspace') return { kind: 'backspace' };
+  if (typeof e.key !== 'string' || e.key.length !== 1) return null;
+  const cc = e.key.charCodeAt(0);
+  if (cc < 0x20 || cc === 0x7f) return null;
+  return { kind: 'char', ch: e.key };
+}
+
 export function keyToBytes(e: KeyLike, applicationCursorMode: boolean): Uint8Array | null {
   const ev: IKeyboardEvent = {
     key: e.key,
@@ -76,6 +102,7 @@ export class InputHandler {
   ta: HTMLTextAreaElement;
   private onData: (b: Uint8Array) => void;
   private getAppCursor: () => boolean;
+  private predict: ((e: PredictEvent) => void) | null;
   private boundKeydown = this.onKeydown.bind(this);
   private boundInput = this.onInput.bind(this);
   private boundPaste = this.onPaste.bind(this);
@@ -83,6 +110,7 @@ export class InputHandler {
   constructor(parent: HTMLElement, opts: InputOpts) {
     this.onData = opts.onData;
     this.getAppCursor = opts.getApplicationCursorMode ?? (() => false);
+    this.predict = opts.predict ?? null;
     this.ta = document.createElement('textarea');
     this.ta.className = 'cloudterm-input';
     this.ta.setAttribute('autocomplete', 'off');
@@ -107,7 +135,19 @@ export class InputHandler {
     if (out) {
       e.preventDefault();
       this.onData(out);
+      if (this.predict) this.emitPrediction(e);
     }
+  }
+
+  // Only fires for keys that have a predictable local-echo effect: single
+  // printable chars with no Ctrl/Meta, and Backspace. Everything else is
+  // either handled by the browser (modifiers consumed), sends a control
+  // sequence that does not echo as a visible glyph at the cursor, or is
+  // ambiguous enough that guessing wrong would look worse than not guessing.
+  private emitPrediction(e: KeyboardEvent): void {
+    if (!this.predict) return;
+    const ev = keyToPrediction(e);
+    if (ev) this.predict(ev);
   }
 
   private onInput(e: Event): void {
@@ -115,6 +155,13 @@ export class InputHandler {
     const v = ta.value;
     if (v.length > 0) {
       this.onData(ENC.encode(v));
+      if (this.predict) {
+        // IME / composed chars: predict each resulting code point.
+        for (const ch of v) {
+          const cc = ch.charCodeAt(0);
+          if (cc >= 0x20 && cc !== 0x7f) this.predict({ kind: 'char', ch });
+        }
+      }
       ta.value = '';
     }
   }
@@ -124,6 +171,9 @@ export class InputHandler {
     if (text && text.length) {
       e.preventDefault();
       this.onData(ENC.encode(text));
+      // Intentionally no prediction: shells may rate-limit, inject bracketed
+      // paste sequences, or mangle pasted content. Let the server's echo be
+      // authoritative.
     }
   }
 

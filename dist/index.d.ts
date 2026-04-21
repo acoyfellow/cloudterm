@@ -1,4 +1,5 @@
 //#region src/renderer.d.ts
+
 interface Theme {
   background: string;
   foreground: string;
@@ -14,6 +15,7 @@ interface MountOptions {
   onTitle?: (title: string) => void;
   theme?: Partial<Theme>;
   maxScrollback?: number;
+  predictionMode?: 'off' | 'auto';
 }
 interface Terminal {
   write(data: string | Uint8Array): void;

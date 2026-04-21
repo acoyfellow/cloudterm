@@ -25,6 +25,7 @@ import { prepare, layout } from '@chenglou/pretext';
 import type { CellAttr } from './parser.js';
 import type { Cell } from './grid.js';
 import { Grid } from './grid.js';
+import type { PredictionBuffer } from './predict.js';
 
 export interface Theme {
   background: string;
@@ -106,6 +107,7 @@ export class DomRenderer {
   sizer: HTMLDivElement;
   surface: HTMLDivElement;
   cursorEl: HTMLSpanElement;
+  predictLayer: HTMLDivElement;
 
   charWidth = 8;
   lineHeight = 16;
@@ -114,6 +116,10 @@ export class DomRenderer {
   // Virtualization: track rendered line indexes -> their divs.
   private rendered = new Map<number, HTMLDivElement>();
   private overscan = 4;
+
+  // Optional speculative-echo overlay. When set, paint() rebuilds the overlay
+  // layer from this buffer on every frame. Items are small (0-5 typical).
+  predictions: PredictionBuffer | null = null;
 
   constructor(host: HTMLElement, grid: Grid, theme: Theme) {
     this.host = host;
@@ -132,8 +138,13 @@ export class DomRenderer {
     // (color, blend mode) lives in the CSS class.
     this.cursorEl = document.createElement('span');
     this.cursorEl.className = 'cloudterm-cursor';
+    // Prediction overlay lives above lines, below cursor's blend layer. Its
+    // children are absolute-positioned ghost glyphs rebuilt every paint.
+    this.predictLayer = document.createElement('div');
+    this.predictLayer.className = 'cloudterm-predictions';
     this.viewport.appendChild(this.sizer);
     this.viewport.appendChild(this.surface);
+    this.surface.appendChild(this.predictLayer);
     this.surface.appendChild(this.cursorEl);
     this.root.appendChild(this.viewport);
     this.host.appendChild(this.root);
@@ -255,23 +266,73 @@ export class DomRenderer {
       this.rendered.set(i, div);
     }
 
+    // Rebuild prediction overlay before cursor so cursor is above it. The
+    // layer is cheap to rebuild: typically 0-5 absolute-positioned spans.
+    this.paintPredictions();
+
     // Position the single surface-level cursor element. Absolute index of
     // the cursor lets us place it relative to the surface without tracking
-    // which line div it would belong to.
+    // which line div it would belong to. If there is a live cursor
+    // prediction, steer the cursor to the predicted position so it tracks
+    // typing without waiting for the server.
     this.positionCursor();
   }
 
   private positionCursor(): void {
-    const cursorAbs = this.grid.scrollback.length + this.grid.cursorRow;
     if (!this.grid.cursorVisible) {
       this.cursorEl.style.display = 'none';
       return;
     }
+    let row = this.grid.cursorRow;
+    let col = this.grid.cursorCol;
+    const latest = this.latestCursorPrediction();
+    if (latest) {
+      row = latest.row;
+      col = latest.col;
+    }
+    const cursorAbs = this.grid.scrollback.length + row;
     this.cursorEl.style.display = '';
     this.cursorEl.style.top = `${cursorAbs * this.lineHeight}px`;
-    this.cursorEl.style.left = `${this.grid.cursorCol * this.charWidth}px`;
+    this.cursorEl.style.left = `${col * this.charWidth}px`;
     this.cursorEl.style.width = `${this.charWidth}px`;
     this.cursorEl.style.height = `${this.lineHeight}px`;
+  }
+
+  private latestCursorPrediction(): { row: number; col: number } | null {
+    if (!this.predictions) return null;
+    let last: { row: number; col: number } | null = null;
+    for (const p of this.predictions.iter()) {
+      if (p.kind === 'cursor') last = { row: p.row, col: p.col };
+    }
+    return last;
+  }
+
+  private paintPredictions(): void {
+    // Full rebuild every paint. Bounded by in-flight keystrokes (0-5 typical),
+    // so the cost stays negligible compared to line rebuilds.
+    this.predictLayer.textContent = '';
+    if (!this.predictions || this.predictions.size === 0) return;
+    const scrollbackLen = this.grid.scrollback.length;
+    for (const p of this.predictions.iter()) {
+      if (p.kind !== 'print') continue;
+      // Skip predictions that would land outside the current grid shape
+      // (resize could have shrunk us below the prediction column).
+      if (p.col < 0 || p.col >= this.grid.cols) continue;
+      if (p.row < 0 || p.row >= this.grid.rows) continue;
+      // If the authoritative cell already matches the prediction, there is
+      // no visual benefit to the overlay (and a risk of subpixel ghosting).
+      const line = this.grid.screen[p.row];
+      if (line && line[p.col] && line[p.col]!.ch === p.ch) continue;
+      const abs = scrollbackLen + p.row;
+      const span = document.createElement('span');
+      span.className = 'cloudterm-predict';
+      span.style.top = `${abs * this.lineHeight}px`;
+      span.style.left = `${p.col * this.charWidth}px`;
+      span.style.width = `${this.charWidth}px`;
+      span.style.height = `${this.lineHeight}px`;
+      span.textContent = p.ch;
+      this.predictLayer.appendChild(span);
+    }
   }
 
   private renderLineInto(div: HTMLDivElement, line: Cell[]): void {

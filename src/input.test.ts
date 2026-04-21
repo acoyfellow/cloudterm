@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { keyToBytes, type KeyLike } from './input.js';
+import { keyToBytes, keyToPrediction, type KeyLike } from './input.js';
 
 // Helper: build a KeyLike fixture. Pass key + keyCode + optional modifiers.
 // Defaults match what a real KeyboardEvent has for unset properties.
@@ -304,5 +304,122 @@ describe('keyToBytes — macOS shortcuts', () => {
 
   test('Cmd+V → null (paste event handles it)', () => {
     expect(keyToBytes(k({ key: 'v', keyCode: 86, metaKey: true }), false)).toBeNull();
+  });
+});
+
+// keyToPrediction decides whether a keydown should also fire the speculative
+// local-echo callback. Conservative by design: arrow keys, control combos,
+// and function keys must NOT fire, because guessing wrong is worse than not
+// guessing. Only plain printable chars and Backspace qualify.
+
+describe('keyToPrediction — printable chars fire', () => {
+  test("plain 'a' fires { kind: 'char', ch: 'a' }", () => {
+    expect(keyToPrediction(k({ key: 'a', keyCode: 65 }))).toEqual({
+      kind: 'char',
+      ch: 'a',
+    });
+  });
+
+  test("Shift+a fires { kind: 'char', ch: 'A' } (key already reflects shift)", () => {
+    expect(keyToPrediction(k({ key: 'A', keyCode: 65, shiftKey: true }))).toEqual({
+      kind: 'char',
+      ch: 'A',
+    });
+  });
+
+  test("digit fires char", () => {
+    expect(keyToPrediction(k({ key: '5', keyCode: 53 }))).toEqual({
+      kind: 'char',
+      ch: '5',
+    });
+  });
+
+  test("punctuation fires char", () => {
+    expect(keyToPrediction(k({ key: '.', keyCode: 190 }))).toEqual({
+      kind: 'char',
+      ch: '.',
+    });
+    expect(keyToPrediction(k({ key: ' ', keyCode: 32 }))).toEqual({
+      kind: 'char',
+      ch: ' ',
+    });
+  });
+});
+
+describe('keyToPrediction — Backspace fires', () => {
+  test('Backspace fires { kind: "backspace" }', () => {
+    expect(keyToPrediction(k({ key: 'Backspace', keyCode: 8 }))).toEqual({
+      kind: 'backspace',
+    });
+  });
+});
+
+describe('keyToPrediction — modifier combos do not fire', () => {
+  test('Ctrl+C does NOT fire', () => {
+    expect(keyToPrediction(k({ key: 'c', keyCode: 67, ctrlKey: true }))).toBeNull();
+  });
+
+  test('Ctrl+L does NOT fire', () => {
+    expect(keyToPrediction(k({ key: 'l', keyCode: 76, ctrlKey: true }))).toBeNull();
+  });
+
+  test('Cmd+A does NOT fire', () => {
+    expect(keyToPrediction(k({ key: 'a', keyCode: 65, metaKey: true }))).toBeNull();
+  });
+
+  test('Cmd+V does NOT fire (paste path handles it)', () => {
+    expect(keyToPrediction(k({ key: 'v', keyCode: 86, metaKey: true }))).toBeNull();
+  });
+
+  test('Alt+B does NOT fire (readline word-back is an escape sequence, not an echo)', () => {
+    expect(keyToPrediction(k({ key: 'b', keyCode: 66, altKey: true }))).toBeNull();
+  });
+
+  test('Ctrl+Backspace does NOT fire (it sends ^H, which is not a visible echo at cursor)', () => {
+    expect(
+      keyToPrediction(k({ key: 'Backspace', keyCode: 8, ctrlKey: true })),
+    ).toBeNull();
+  });
+});
+
+describe('keyToPrediction — navigation and special keys do not fire', () => {
+  test('arrow keys do NOT fire', () => {
+    expect(keyToPrediction(k({ key: 'ArrowLeft', keyCode: 37 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'ArrowUp', keyCode: 38 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'ArrowRight', keyCode: 39 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'ArrowDown', keyCode: 40 }))).toBeNull();
+  });
+
+  test('Enter does NOT fire (the server decides how the prompt redraws)', () => {
+    expect(keyToPrediction(k({ key: 'Enter', keyCode: 13 }))).toBeNull();
+  });
+
+  test('Tab does NOT fire (completion output is unpredictable)', () => {
+    expect(keyToPrediction(k({ key: 'Tab', keyCode: 9 }))).toBeNull();
+  });
+
+  test('Escape does NOT fire', () => {
+    expect(keyToPrediction(k({ key: 'Escape', keyCode: 27 }))).toBeNull();
+  });
+
+  test('F-keys do NOT fire', () => {
+    expect(keyToPrediction(k({ key: 'F1', keyCode: 112 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'F5', keyCode: 116 }))).toBeNull();
+  });
+
+  test('Home/End/PageUp/PageDown/Insert/Delete do NOT fire', () => {
+    expect(keyToPrediction(k({ key: 'Home', keyCode: 36 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'End', keyCode: 35 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'PageUp', keyCode: 33 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'PageDown', keyCode: 34 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'Insert', keyCode: 45 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'Delete', keyCode: 46 }))).toBeNull();
+  });
+
+  test('modifier-only keys do NOT fire', () => {
+    expect(keyToPrediction(k({ key: 'Shift', keyCode: 16 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'Control', keyCode: 17 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'Alt', keyCode: 18 }))).toBeNull();
+    expect(keyToPrediction(k({ key: 'Meta', keyCode: 91 }))).toBeNull();
   });
 });

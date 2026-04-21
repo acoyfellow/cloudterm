@@ -55,6 +55,7 @@ interface MountOptions {
   onTitle?: (title: string) => void;
   theme?: Partial<Theme>;
   maxScrollback?: number;
+  predictionMode?: 'off' | 'auto'; // default 'auto'
 }
 
 interface Terminal {
@@ -112,6 +113,16 @@ interface Theme {
 | Home / End / PageUp / PageDown / Insert / Delete | per xterm spec |
 | Cmd+A / Cmd+C / Cmd+V | null (browser handles) |
 
+## Speculative local echo
+
+Typed characters paint as a dimmed overlay at the predicted cursor position while the client waits for the server's echo. When the echo arrives, the overlay cell and the authoritative cell agree and the user sees no glitch. When they disagree, the authoritative paint overwrites the overlay.
+
+The overlay is client-only: the authoritative `Grid` is never touched speculatively. Predictions are recorded for printable characters and Backspace; control sequences, arrow keys, Cmd-combos, and pastes do not generate predictions. Predictions are disabled automatically while the alternate-screen buffer is active (vim, less, tmux) or while DECCKM is set.
+
+Set `predictionMode: 'off'` in `MountOptions` to disable the whole system.
+
+**Known limitation:** Password prompts that use `stty -echo` do not echo typed characters back. cloudterm paints the predicted character, then the 500ms TTL sweeps it away. The overlay briefly shows the typed character. This is a client-only leak onto the user's own screen; the character is never transmitted anywhere the server did not intend. A full fix requires tracking the PTY's echo mode, which cloudterm does not do.
+
 ## Not included
 
 - No canvas or WebGL renderer
@@ -122,7 +133,7 @@ interface Theme {
 - No alternate-screen switching
 - No link detection
 - No built-in selection (browser handles it)
-- No DECCKM application cursor mode (TODO)
+- No per-RTT calibration for speculative echo (always on when enabled)
 
 ## Related
 

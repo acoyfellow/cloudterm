@@ -58,6 +58,27 @@
   z-index: 1;
 }
 
+/* Speculative local echo overlay. The layer holds zero or more ghost glyphs
+   rendered on top of the authoritative grid while the client waits for the
+   server's echo. Reduced opacity makes them read as provisional without
+   shouting. Rebuilt every paint; kept free of layout-affecting styles. */
+.cloudterm-predictions {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.cloudterm-predict {
+  position: absolute;
+  pointer-events: none;
+  font: inherit;
+  color: var(--ct-fg, #e6e8eb);
+  opacity: 0.85;
+  white-space: pre;
+}
+
 /* Hidden but focusable. Must not use display:none, visibility:hidden, or
    left:-9999px: those break focus on some browsers / screen readers.
    A 1x1 opacity:0 textarea pinned at (0,0) is the xterm.js-style approach. */

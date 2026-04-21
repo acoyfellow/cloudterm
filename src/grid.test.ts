@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { createHeadless } from './headless.js';
 import type { Grid } from './grid.js';
+import { PredictionBuffer } from './predict.js';
 
 // Drive a real Grid through the real AnsiParser via createHeadless, the
 // documented headless entry point. No mocks; all state assertions read
@@ -390,5 +391,52 @@ describe('Grid per-line dirty tracking', () => {
     expect(d.dirtyAll).toBe(false);
     const abs = grid.scrollback.length + row;
     expect([...d.dirtyLines]).toEqual([abs]);
+  });
+});
+
+// Integration: feed ANSI through the real parser into a headless grid while
+// reconciling a PredictionBuffer alongside. The reconciliation semantics
+// match the ones index.ts installs in the sink wrapper: capture cursor
+// before print, call onGridPrint(row, col, ch) after. Cursor-moving ops
+// call onGridCursor after mutation.
+describe('PredictionBuffer integration with headless grid', () => {
+  test("speculative 'a' at (0,5) is consumed when the parser prints 'a' there", () => {
+    const h = createHeadless(20, 5, { maxScrollback: 100 });
+    const buf = new PredictionBuffer();
+    // User typed 'a' while cursor was at (0, 5). Speculation recorded.
+    buf.push({ kind: 'print', row: 0, col: 5, ch: 'a', at: 0 });
+    expect(buf.size).toBe(1);
+
+    // Server echoes: home cursor, move to column 6 (1-based), print 'a'.
+    // Cursor should land at (0, 5) before the print. Reconcile in the order
+    // index.ts does: capture before print, then feed and reconcile.
+    h.feedString('\x1b[H'); // home
+    h.feedString('\x1b[6G'); // column 6 (1-based) => col 5 (0-based)
+    expect(h.grid.cursorRow).toBe(0);
+    expect(h.grid.cursorCol).toBe(5);
+
+    // Before the parser prints, capture where the cursor is.
+    const r = h.grid.cursorRow;
+    const c = h.grid.cursorCol;
+    h.feedString('a');
+    buf.onGridPrint(r, c, 'a');
+
+    expect(buf.size).toBe(0);
+    // Grid has the real 'a' at (0, 5).
+    expect(h.grid.screen[0]![5]!.ch).toBe('a');
+  });
+
+  test("mismatched ch at the predicted (row, col) drops everything", () => {
+    const h = createHeadless(20, 5);
+    const buf = new PredictionBuffer();
+    buf.push({ kind: 'print', row: 0, col: 5, ch: 'a', at: 0 });
+    buf.push({ kind: 'cursor', row: 0, col: 6, at: 0 });
+    h.feedString('\x1b[H\x1b[6G');
+    const r = h.grid.cursorRow;
+    const c = h.grid.cursorCol;
+    // Server prints 'b' where we predicted 'a'.
+    h.feedString('b');
+    buf.onGridPrint(r, c, 'b');
+    expect(buf.size).toBe(0);
   });
 });

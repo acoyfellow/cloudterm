@@ -5,129 +5,66 @@
 // and it is invisible. The visible terminal content sits beneath and is
 // painted by the renderer.
 //
-// keydown handles named/control keys and emits ANSI sequences.
-// input handles printable chars (and IME) as UTF-8.
-// paste handles clipboard text as UTF-8.
+// keydown runs the xterm.js `evaluateKeyboardEvent` port and emits bytes for
+// named/control keys. `input` handles printable chars (and IME) as UTF-8.
+// `paste` handles clipboard text as UTF-8.
+
+import {
+  evaluateKeyboardEvent,
+  KeyboardResultType,
+  type IKeyboardEvent,
+} from './xterm-keyboard.js';
 
 export interface InputOpts {
   onData: (bytes: Uint8Array) => void;
 }
 
 // Minimal shape used by keyToBytes. Keeps the function testable without a DOM.
+// Mirrors the subset of `KeyboardEvent` that xterm.js's evaluateKeyboardEvent
+// reads: modifier flags plus `key`, `keyCode`, `code`, `type`.
 export interface KeyLike {
   key: string;
+  keyCode: number;
   ctrlKey: boolean;
   altKey: boolean;
   shiftKey: boolean;
   metaKey: boolean;
+  code?: string;
+  type?: string;
 }
 
 const ENC = new TextEncoder();
 
-function bytes(s: string): Uint8Array {
-  return ENC.encode(s);
+function isMac(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const platform = (navigator as { platform?: string }).platform ?? '';
+  if (platform) return /Mac|iPhone|iPad|iPod/.test(platform);
+  const ua = navigator.userAgent ?? '';
+  return /Mac|iPhone|iPad|iPod/.test(ua);
 }
 
-// Map a KeyboardEvent-shaped object to bytes, or null if the 'input' event
-// path should handle it (printable chars, IME, etc.).
+// Adapter around xterm.js's evaluateKeyboardEvent. Returns the bytes to send
+// to the PTY, or null to let the browser handle the event (the 'input' event
+// path picks up printable chars / IME composition).
+//
+// TODO: thread applicationCursorMode through from Grid. The shell sets it via
+// DECSET `CSI ?1h` / `CSI ?1l` (vim, less, etc.). For now hardcoded false so
+// cursor keys emit the non-application form (`ESC [ A` vs `ESC O A`).
 export function keyToBytes(e: KeyLike): Uint8Array | null {
-  const key = e.key;
-  const ctrl = e.ctrlKey;
-  const alt = e.altKey;
-  const shift = e.shiftKey;
-  const meta = e.metaKey;
-
-  // Let OS shortcuts (Cmd+C copy, Cmd+V paste, Cmd+A select-all) pass through.
-  // Paste is handled by the 'paste' event.
-  if (meta && !ctrl) return null;
-
-  // Named keys.
-  switch (key) {
-    case 'Enter':
-      return bytes('\r');
-    case 'Backspace':
-      return bytes(ctrl ? '\x08' : '\x7f');
-    case 'Tab':
-      return bytes(shift ? '\x1b[Z' : '\t');
-    case 'Escape':
-      return bytes('\x1b');
-    case 'ArrowUp':
-      return bytes(alt ? '\x1b\x1b[A' : '\x1b[A');
-    case 'ArrowDown':
-      return bytes(alt ? '\x1b\x1b[B' : '\x1b[B');
-    case 'ArrowRight':
-      return bytes(alt ? '\x1b\x1b[C' : '\x1b[C');
-    case 'ArrowLeft':
-      return bytes(alt ? '\x1b\x1b[D' : '\x1b[D');
-    case 'Home':
-      return bytes('\x1b[H');
-    case 'End':
-      return bytes('\x1b[F');
-    case 'PageUp':
-      return bytes('\x1b[5~');
-    case 'PageDown':
-      return bytes('\x1b[6~');
-    case 'Insert':
-      // Shift+Insert is the X11 paste shortcut. Let the browser 'paste' event handle it.
-      if (shift) return null;
-      return bytes('\x1b[2~');
-    case 'Delete':
-      return bytes('\x1b[3~');
-    case 'F1':
-      return bytes('\x1bOP');
-    case 'F2':
-      return bytes('\x1bOQ');
-    case 'F3':
-      return bytes('\x1bOR');
-    case 'F4':
-      return bytes('\x1bOS');
-    case 'F5':
-      return bytes('\x1b[15~');
-    case 'F6':
-      return bytes('\x1b[17~');
-    case 'F7':
-      return bytes('\x1b[18~');
-    case 'F8':
-      return bytes('\x1b[19~');
-    case 'F9':
-      return bytes('\x1b[20~');
-    case 'F10':
-      return bytes('\x1b[21~');
-    case 'F11':
-      return bytes('\x1b[23~');
-    case 'F12':
-      return bytes('\x1b[24~');
-  }
-
-  // Ctrl + letter -> C0 control code (Ctrl+A = 0x01, Ctrl+Z = 0x1a).
-  if (ctrl && !alt && !meta && key.length === 1) {
-    const c = key.toLowerCase().charCodeAt(0);
-    if (c >= 0x61 && c <= 0x7a) {
-      return new Uint8Array([c - 0x60]);
-    }
-    switch (key) {
-      case '[':
-        return new Uint8Array([0x1b]);
-      case '\\':
-        return new Uint8Array([0x1c]);
-      case ']':
-        return new Uint8Array([0x1d]);
-      case '^':
-        return new Uint8Array([0x1e]);
-      case '_':
-        return new Uint8Array([0x1f]);
-      case ' ':
-        return new Uint8Array([0x00]);
-    }
-  }
-
-  // Alt + printable -> ESC + char.
-  if (alt && !ctrl && !meta && key.length === 1) {
-    return bytes('\x1b' + key);
-  }
-
-  // Let the 'input' event emit printable characters (handles IME correctly).
-  return null;
+  const ev: IKeyboardEvent = {
+    key: e.key,
+    keyCode: e.keyCode,
+    ctrlKey: e.ctrlKey,
+    altKey: e.altKey,
+    shiftKey: e.shiftKey,
+    metaKey: e.metaKey,
+    code: e.code ?? '',
+    type: e.type ?? 'keydown',
+  };
+  const result = evaluateKeyboardEvent(ev, false, isMac(), true);
+  if (result.type !== KeyboardResultType.SEND_KEY) return null;
+  if (!result.key) return null;
+  return ENC.encode(result.key);
 }
 
 export class InputHandler {

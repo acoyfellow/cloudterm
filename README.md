@@ -87,6 +87,21 @@ import 'cloudterm/style.css';
 | C0 | BS, HT, LF/VT/FF, CR, BEL |
 | OSC | 0, 1, 2 (window title) |
 
+## Keyboard
+
+Keyboard handling is ported from xterm.js (`evaluateKeyboardEvent`, MIT). Full xterm modifier encoding: Shift (+1), Alt (+2), Ctrl (+4), Meta (+8), combined via `CSI 1;N <direction>`. Covers:
+
+| Combo | Emits |
+|---|---|
+| Ctrl+Left / Ctrl+Right | `CSI 1;5D` / `CSI 1;5C` — word jump in zsh/bash |
+| Shift+arrow | `CSI 1;2<dir>` — selection extend |
+| Alt+B / Alt+F | `ESC b` / `ESC f` — readline word jump |
+| Ctrl+A-Z | C0 control codes — full readline control set |
+| F1-F12 + modifiers | SS3 / CSI form per xterm spec, 96 combinations |
+| Cmd+A / Cmd+C / Cmd+V | passed to browser (select-all, copy, paste) |
+
+Application cursor mode (DECCKM) is not yet threaded from parser to input — TODO. Cursor keys currently emit the non-application form only.
+
 ## What's not included
 
 - No canvas/WebGL renderer
@@ -96,7 +111,6 @@ import 'cloudterm/style.css';
 - No mouse reporting or alt-screen switching
 - No link detection
 - No built-in selection (browser handles it)
-- No tests (yet)
 
 ## Related
 

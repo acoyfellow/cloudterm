@@ -1,16 +1,16 @@
 # cloudterm smoke report
 
-Generated 2026-04-21T09:26:14.115Z on node v22.22.2.
+Generated 2026-04-21T10:31:17.358Z on node v22.22.2.
 
 **3 pass · 0 fail · 2 skip**
 
 | scenario | status | duration | snapshots | bytes |
 |----------|--------|----------|-----------|-------|
-| basic | PASS | 1.15s | 5 | 1149 |
-| vim | PASS | 1.22s | 4 | 4124 |
-| less | PASS | 1.13s | 4 | 3216 |
-| htop | SKIP | 8ms | 0 | 0 |
-| tmux | SKIP | 6ms | 0 | 0 |
+| basic | PASS | 1.03s | 5 | 1149 |
+| vim | PASS | 1.08s | 4 | 4114 |
+| less | PASS | 1.08s | 4 | 3216 |
+| htop | SKIP | 7ms | 0 | 0 |
+| tmux | SKIP | 5ms | 0 | 0 |
 
 ## how to read this
 
@@ -23,7 +23,7 @@ Generated 2026-04-21T09:26:14.115Z on node v22.22.2.
   an alt-screen excursion. If they differ unexpectedly, the main buffer was
   not preserved.
 
-## basic — PASS (1.15s)
+## basic — PASS (1.03s)
 
 - bytes received from PTY: 1149
 - snapshots: 5
@@ -34,13 +34,13 @@ Generated 2026-04-21T09:26:14.115Z on node v22.22.2.
 | # | type | label | ms | note |
 |---|------|-------|----|------|
 | 0 | input |  | 0 | "export PS1='>>> ' PS2='... '; clear\r" |
-| 1 | waitFor | initial-prompt | 21 | />>> / -> match |
+| 1 | waitFor | initial-prompt | 22 | />>> / -> match |
 | 2 | snapshot | after-clear | 51 |  |
 | 3 | input |  | 0 | "echo hello\r" |
-| 4 | waitFor | echo-output | 21 | /hello/ -> match |
-| 5 | snapshot | after-echo | 51 |  |
+| 4 | waitFor | echo-output | 20 | /hello/ -> match |
+| 5 | snapshot | after-echo | 50 |  |
 | 6 | input |  | 0 | "pwd\r" |
-| 7 | waitFor | pwd-output | 457 | /\// -> match |
+| 7 | waitFor | pwd-output | 335 | /\// -> match |
 | 8 | snapshot | after-pwd | 51 |  |
 | 9 | input |  | 0 | "printf \"col1\\tcol2\\tcol3\\n\"\r" |
 | 10 | waitFor | tabs | 21 | /col3/ -> match |
@@ -248,9 +248,9 @@ col1    col2    col3
 
 ```
 
-## vim — PASS (1.22s)
+## vim — PASS (1.08s)
 
-- bytes received from PTY: 4124
+- bytes received from PTY: 4114
 - snapshots: 4
 - steps: 16
 
@@ -259,19 +259,19 @@ col1    col2    col3
 | # | type | label | ms | note |
 |---|------|-------|----|------|
 | 0 | input |  | 0 | "export PS1='>>> ' PS2='... '; clear\r" |
-| 1 | waitFor | initial-prompt | 20 | />>> / -> match |
+| 1 | waitFor | initial-prompt | 21 | />>> / -> match |
 | 2 | input |  | 0 | "echo MARKER_BEFORE_VIM_42\r" |
-| 3 | waitFor | marker-visible | 21 | /MARKER_BEFORE_VIM_42/ -> match |
+| 3 | waitFor | marker-visible | 20 | /MARKER_BEFORE_VIM_42/ -> match |
 | 4 | snapshot | main-before-vim | 51 |  |
 | 5 | input |  | 0 | "vim -n -u NONE\r" |
-| 6 | waitFor | vim-painted | 562 | /~/ -> match |
+| 6 | waitFor | vim-painted | 416 | /~/ -> match |
 | 7 | wait |  | 201 |  |
-| 8 | snapshot | alt-in-vim | 52 |  |
+| 8 | snapshot | alt-in-vim | 51 |  |
 | 9 | input |  | 0 | "iHELLO_FROM_VIM\u001b" |
-| 10 | waitFor | vim-typed | 20 | /HELLO_FROM_VIM/ -> match |
+| 10 | waitFor | vim-typed | 21 | /HELLO_FROM_VIM/ -> match |
 | 11 | snapshot | alt-in-vim-with-text | 51 |  |
 | 12 | input |  | 0 | ":q!\r" |
-| 13 | waitFor | prompt-after-vim | 21 | />>> / -> match |
+| 13 | waitFor | prompt-after-vim | 20 | />>> / -> match |
 | 14 | snapshot | main-after-vim | 51 |  |
 | 15 | input |  | 0 | "exit\r" |
 
@@ -327,8 +327,8 @@ echo MARKER_BEFORE_VIM_42
 ~                           by Bram Moolenaar et al.
 ~                 Vim is open source and freely distributable
 ~
-~                        Become a registered Vim user!
-~                type  :help register<Enter>   for information
+~                           Sponsor Vim development!
+~                type  :help sponsor<Enter>    for information
 ~
 ~                type  :q<Enter>               to exit
 ~                type  :help<Enter>  or  <F1>  for on-line help
@@ -440,7 +440,7 @@ MARKER_BEFORE_VIM_42
 
 ```
 
-## less — PASS (1.13s)
+## less — PASS (1.08s)
 
 - bytes received from PTY: 3216
 - snapshots: 4
@@ -451,11 +451,11 @@ MARKER_BEFORE_VIM_42
 | # | type | label | ms | note |
 |---|------|-------|----|------|
 | 0 | input |  | 0 | "export PS1='>>> ' PS2='... '; clear\r" |
-| 1 | waitFor | initial-prompt | 20 | />>> / -> match |
+| 1 | waitFor | initial-prompt | 21 | />>> / -> match |
 | 2 | snapshot | main-before-less | 51 |  |
 | 3 | input |  | 0 | "less /etc/passwd\r" |
-| 4 | waitFor | less-content | 459 | /(root\|nobody\|daemon):/ -> match |
-| 5 | snapshot | in-less | 51 |  |
+| 4 | waitFor | less-content | 412 | /(root\|nobody\|daemon):/ -> match |
+| 5 | snapshot | in-less | 52 |  |
 | 6 | input |  | 0 | " " |
 | 7 | wait |  | 251 |  |
 | 8 | snapshot | in-less-scrolled | 51 |  |
@@ -629,10 +629,10 @@ _tokend:*:91:91:Token Daemon:/var/empty:/usr/bin/false
 
 ```
 
-## htop — SKIP (8ms)
+## htop — SKIP (7ms)
 
 _skipped: htop not installed_
 
-## tmux — SKIP (6ms)
+## tmux — SKIP (5ms)
 
 _skipped: tmux not installed_

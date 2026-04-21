@@ -5,10 +5,21 @@
 //     .cloudterm-viewport          overflow:auto
 //       .cloudterm-sizer           height = totalLines * lineHeight (absolute spacer)
 //       .cloudterm-surface         absolute, translated by scrollTop, contains visible line divs
+//         .cloudterm-cursor        single long-lived element at surface root
 //     textarea.cloudterm-input     offscreen
 //
 // Each line is a <div class="cloudterm-line"> with absolute top.
 // Inside each line, runs of same-styled text are <span>s.
+//
+// The cursor is a single surface-level <span class="cloudterm-cursor"> that
+// never moves out of the DOM. Every paint repositions its top/left/width/
+// height. This decouples cursor rendering from line rebuilds: a cursor
+// blink or same-line cursor move does not rebuild any line.
+//
+// Per-line virtualization: only lines whose absolute index lies in the
+// viewport (plus overscan) have a div in the DOM. Of those, only lines
+// that Grid marked dirty since the last paint are rebuilt. Lines newly
+// entering the visible range build regardless (they have no div yet).
 
 import { prepare, layout } from '@chenglou/pretext';
 import type { CellAttr } from './parser.js';
@@ -88,6 +99,7 @@ export class DomRenderer {
   viewport: HTMLDivElement;
   sizer: HTMLDivElement;
   surface: HTMLDivElement;
+  cursorEl: HTMLSpanElement;
 
   charWidth = 8;
   lineHeight = 16;
@@ -109,8 +121,14 @@ export class DomRenderer {
     this.sizer.className = 'cloudterm-sizer';
     this.surface = document.createElement('div');
     this.surface.className = 'cloudterm-surface';
+    // Single long-lived cursor element. Positioned absolutely at surface
+    // root so same-line cursor moves never touch a line div. Styling
+    // (color, blend mode) lives in the CSS class.
+    this.cursorEl = document.createElement('span');
+    this.cursorEl.className = 'cloudterm-cursor';
     this.viewport.appendChild(this.sizer);
     this.viewport.appendChild(this.surface);
+    this.surface.appendChild(this.cursorEl);
     this.root.appendChild(this.viewport);
     this.host.appendChild(this.root);
 
@@ -195,6 +213,11 @@ export class DomRenderer {
       Math.ceil((scrollTop + vpHeight) / this.lineHeight) + this.overscan,
     );
 
+    // Consume dirty state once per paint. After this call, the grid has no
+    // record of what changed; any subsequent mutation will mark itself dirty
+    // for the next paint.
+    const { dirtyAll, dirtyLines } = this.grid.consumeDirty();
+
     // Remove stale
     for (const [idx, el] of this.rendered) {
       if (idx < first || idx > last) {
@@ -203,34 +226,52 @@ export class DomRenderer {
       }
     }
 
-    // Add / update visible
+    // Add / update visible. For each visible absolute index:
+    //   - if no div exists: build one (newly scrolled into view).
+    //   - else if dirtyAll or index in dirtyLines: rebuild contents.
+    //   - else: just update top (cheap; the div is already correct).
     for (let i = first; i <= last; i++) {
-      const line = this.grid.getLine(i);
       const existing = this.rendered.get(i);
+      const mustRebuild = dirtyAll || dirtyLines.has(i);
       if (existing) {
         existing.style.top = `${i * this.lineHeight}px`;
-        this.renderLineInto(existing, line, i);
+        if (mustRebuild) {
+          this.renderLineInto(existing, this.grid.getLine(i));
+        }
         continue;
       }
       const div = document.createElement('div');
       div.className = 'cloudterm-line';
       div.style.top = `${i * this.lineHeight}px`;
       div.style.height = `${this.lineHeight}px`;
-      this.renderLineInto(div, line, i);
+      this.renderLineInto(div, this.grid.getLine(i));
       this.surface.appendChild(div);
       this.rendered.set(i, div);
     }
 
-    this.grid.dirty = false;
+    // Position the single surface-level cursor element. Absolute index of
+    // the cursor lets us place it relative to the surface without tracking
+    // which line div it would belong to.
+    this.positionCursor();
   }
 
-  private renderLineInto(div: HTMLDivElement, line: Cell[], lineIndex: number): void {
-    // Clear
+  private positionCursor(): void {
+    const cursorAbs = this.grid.scrollback.length + this.grid.cursorRow;
+    if (!this.grid.cursorVisible) {
+      this.cursorEl.style.display = 'none';
+      return;
+    }
+    this.cursorEl.style.display = '';
+    this.cursorEl.style.top = `${cursorAbs * this.lineHeight}px`;
+    this.cursorEl.style.left = `${this.grid.cursorCol * this.charWidth}px`;
+    this.cursorEl.style.width = `${this.charWidth}px`;
+    this.cursorEl.style.height = `${this.lineHeight}px`;
+  }
+
+  private renderLineInto(div: HTMLDivElement, line: Cell[]): void {
+    // Clear. The cursor no longer lives inside line divs, so this rebuild
+    // only concerns text runs.
     div.textContent = '';
-    // Determine if this line contains cursor.
-    const cursorLineIndex = this.grid.scrollback.length + this.grid.cursorRow;
-    const hasCursor =
-      this.grid.cursorVisible && lineIndex === cursorLineIndex;
 
     // Build runs of same-styled cells.
     let runStart = 0;
@@ -249,15 +290,6 @@ export class DomRenderer {
       }
     }
     if (runBuf.length) this.emitRun(div, runBuf, line[runStart]!.attr);
-
-    if (hasCursor) {
-      const cursorEl = document.createElement('span');
-      cursorEl.className = 'cloudterm-cursor';
-      cursorEl.style.left = `${this.grid.cursorCol * this.charWidth}px`;
-      cursorEl.style.width = `${this.charWidth}px`;
-      cursorEl.style.height = `${this.lineHeight}px`;
-      div.appendChild(cursorEl);
-    }
   }
 
   private emitRun(parent: HTMLDivElement, text: string, attr: CellAttr): void {

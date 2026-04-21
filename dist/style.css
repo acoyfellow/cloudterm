@@ -46,11 +46,16 @@
   white-space: pre;
 }
 
+/* The cursor is a single long-lived element at the surface root, not a
+   child of any line div. z-index lifts it above line text so the blend
+   mode mixes with the rendered glyphs beneath it. */
 .cloudterm-cursor {
   position: absolute;
   background: var(--ct-cursor, #7cc4ff);
   opacity: 0.4;
   mix-blend-mode: difference;
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* Hidden but focusable. Must not use display:none, visibility:hidden, or

@@ -6,6 +6,21 @@
 //
 // Cursor lives inside the screen region. Writes mutate screen rows.
 // When LF at the bottom, the top screen row is pushed into scrollback.
+//
+// Dirty tracking:
+//   dirty:      boolean, true if any mutation happened since last consume.
+//   dirtyAll:   boolean, true if everything visible must be repainted
+//               (resize, alt-screen swap). Overrides dirtyLines.
+//   dirtyLines: Set<number> of absolute line indexes that changed since
+//               last consume. Absolute index = scrollback.length + screenRow
+//               at the time the mutation happened, which stays stable across
+//               subsequent scrollback pushes.
+//
+// The renderer calls consumeDirty() once per paint, which returns and clears
+// both dirtyAll and dirtyLines. Cursor moves between lines dirty both old
+// and new line; moves within a line dirty just that line. The renderer
+// draws the cursor as a surface-level element so same-line moves are cheap
+// even though the line is still marked dirty.
 
 import type { CellAttr } from './parser.js';
 import { defaultAttr } from './parser.js';
@@ -31,6 +46,11 @@ export interface GridSnapshot {
   cursorRow: number;
   cursorCol: number;
   cursorVisible: boolean;
+}
+
+export interface DirtyState {
+  dirtyAll: boolean;
+  dirtyLines: Set<number>;
 }
 
 export class Grid {
@@ -64,6 +84,8 @@ export class Grid {
   applicationCursorMode = false;
 
   dirty = true;
+  dirtyAll = true;
+  dirtyLines = new Set<number>();
 
   constructor(cols: number, rows: number, maxScrollback = 10_000) {
     this.cols = Math.max(1, cols);
@@ -71,6 +93,54 @@ export class Grid {
     this.maxScrollback = Math.max(0, maxScrollback);
     this.screen = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.altScreen = Array.from({ length: this.rows }, () => makeRow(this.cols));
+  }
+
+  // Absolute line index of the given screen row. Stable reference the renderer
+  // uses to key its DOM map.
+  private absOf(screenRow: number): number {
+    return this.scrollback.length + screenRow;
+  }
+
+  private markRow(screenRow: number): void {
+    if (screenRow < 0 || screenRow >= this.rows) return;
+    this.dirtyLines.add(this.absOf(screenRow));
+    this.dirty = true;
+  }
+
+  private markRange(rStart: number, rEnd: number): void {
+    const a = Math.max(0, rStart);
+    const b = Math.min(this.rows - 1, rEnd);
+    for (let r = a; r <= b; r++) this.dirtyLines.add(this.absOf(r));
+    this.dirty = true;
+  }
+
+  private markAllVisible(): void {
+    this.dirtyAll = true;
+    this.dirty = true;
+    // dirtyLines will be ignored while dirtyAll is set; keep it for any
+    // caller that wants to union, but don't bother building up a full set.
+  }
+
+  // Called around cursor-moving ops. Captures old cursor row, runs the
+  // mover, then marks both old and new rows dirty. If the mover itself
+  // marked rows, those still stand.
+  private withCursorMove(fn: () => void): void {
+    const oldRow = this.cursorRow;
+    fn();
+    // Mark old and new cursor rows dirty so the cursor element can be
+    // cleared from the old line and drawn on the new. Renderer still
+    // repositions the cursor span at surface level, so same-line moves
+    // only rebuild one line, not all visible lines.
+    this.markRow(oldRow);
+    if (this.cursorRow !== oldRow) this.markRow(this.cursorRow);
+  }
+
+  consumeDirty(): DirtyState {
+    const state: DirtyState = { dirtyAll: this.dirtyAll, dirtyLines: this.dirtyLines };
+    this.dirtyAll = false;
+    this.dirtyLines = new Set<number>();
+    this.dirty = false;
+    return state;
   }
 
   resize(cols: number, rows: number): void {
@@ -89,7 +159,7 @@ export class Grid {
     this.rows = rows;
     if (this.cursorRow >= rows) this.cursorRow = rows - 1;
     if (this.cursorCol >= cols) this.cursorCol = cols - 1;
-    this.dirty = true;
+    this.markAllVisible();
   }
 
   private resizeBuffer(
@@ -123,14 +193,22 @@ export class Grid {
     if (this.maxScrollback === 0) return;
     this.scrollback.push(row);
     if (this.scrollback.length > this.maxScrollback) {
-      this.scrollback.splice(0, this.scrollback.length - this.maxScrollback);
+      const drop = this.scrollback.length - this.maxScrollback;
+      this.scrollback.splice(0, drop);
+      // Overflow: every previously-tracked dirty absolute index shifted
+      // down by `drop`. Rather than rewriting the set, just force a full
+      // repaint. This is rare (only when the scrollback cap is reached)
+      // and only costs one extra frame.
+      if (this.dirtyLines.size > 0) this.markAllVisible();
     }
   }
 
   // Move cursor absolute
   setCursor(row: number, col: number): void {
-    this.cursorRow = Math.min(this.rows - 1, Math.max(0, row));
-    this.cursorCol = Math.min(this.cols - 1, Math.max(0, col));
+    this.withCursorMove(() => {
+      this.cursorRow = Math.min(this.rows - 1, Math.max(0, row));
+      this.cursorCol = Math.min(this.cols - 1, Math.max(0, col));
+    });
   }
 
   saveCursor(): void {
@@ -138,16 +216,21 @@ export class Grid {
     this.savedCol = this.cursorCol;
   }
   restoreCursor(): void {
-    this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.savedRow));
-    this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.savedCol));
+    this.withCursorMove(() => {
+      this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.savedRow));
+      this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.savedCol));
+    });
   }
 
   writeChar(ch: string, attr: CellAttr): void {
     if (this.cursorCol >= this.cols) this.wrapToNextLine();
     const row = this.screen[this.cursorRow]!;
     row[this.cursorCol] = { ch, attr: { ...attr } };
-    this.cursorCol += 1;
+    // Inline markRow to avoid call overhead in the hot path. writeChar
+    // is the single most-frequent mutation in any shell session.
+    this.dirtyLines.add(this.scrollback.length + this.cursorRow);
     this.dirty = true;
+    this.cursorCol += 1;
   }
 
   private wrapToNextLine(): void {
@@ -156,18 +239,28 @@ export class Grid {
   }
 
   carriageReturn(): void {
+    // Cursor stays on the same row; mark that row so the cursor span is
+    // removed from its old column on rebuild.
+    this.markRow(this.cursorRow);
     this.cursorCol = 0;
-    this.dirty = true;
   }
 
   lineFeed(): void {
     if (this.cursorRow < this.rows - 1) {
+      // Simple move down. Mark both old and new rows for cursor movement.
+      this.markRow(this.cursorRow);
       this.cursorRow += 1;
+      this.markRow(this.cursorRow);
     } else {
-      // scroll up
+      // Scroll up: top row becomes scrollback, a new blank row appears at
+      // the bottom. All visible rows' content moved up one screen slot,
+      // but their absolute indexes are stable. The new bottom row is
+      // fresh content and the cursor is now on it.
       const gone = this.screen.shift();
       if (gone) this.pushScrollback(gone);
       this.screen.push(makeRow(this.cols));
+      // New bottom row's absolute index is the one the cursor is on now.
+      this.markRow(this.cursorRow);
     }
     this.dirty = true;
   }
@@ -175,47 +268,53 @@ export class Grid {
   backspace(): void {
     if (this.cursorCol > 0) {
       this.cursorCol -= 1;
-      this.dirty = true;
+      this.markRow(this.cursorRow);
     }
   }
 
   tab(): void {
     const next = (Math.floor(this.cursorCol / 8) + 1) * 8;
     this.cursorCol = Math.min(this.cols - 1, next);
-    this.dirty = true;
+    this.markRow(this.cursorRow);
   }
 
   cursorUp(n: number): void {
-    this.cursorRow = Math.max(0, this.cursorRow - Math.max(1, n));
-    this.dirty = true;
+    this.withCursorMove(() => {
+      this.cursorRow = Math.max(0, this.cursorRow - Math.max(1, n));
+    });
   }
   cursorDown(n: number): void {
-    this.cursorRow = Math.min(this.rows - 1, this.cursorRow + Math.max(1, n));
-    this.dirty = true;
+    this.withCursorMove(() => {
+      this.cursorRow = Math.min(this.rows - 1, this.cursorRow + Math.max(1, n));
+    });
   }
   cursorForward(n: number): void {
-    this.cursorCol = Math.min(this.cols - 1, this.cursorCol + Math.max(1, n));
-    this.dirty = true;
+    this.withCursorMove(() => {
+      this.cursorCol = Math.min(this.cols - 1, this.cursorCol + Math.max(1, n));
+    });
   }
   cursorBack(n: number): void {
-    this.cursorCol = Math.max(0, this.cursorCol - Math.max(1, n));
-    this.dirty = true;
+    this.withCursorMove(() => {
+      this.cursorCol = Math.max(0, this.cursorCol - Math.max(1, n));
+    });
   }
 
   eraseInDisplay(mode: number): void {
     // 0: cursor to end; 1: start to cursor; 2/3: entire screen
     if (mode === 2 || mode === 3) {
       for (let r = 0; r < this.rows; r++) this.screen[r] = makeRow(this.cols);
+      this.markRange(0, this.rows - 1);
     } else if (mode === 1) {
       for (let r = 0; r < this.cursorRow; r++) this.screen[r] = makeRow(this.cols);
       const row = this.screen[this.cursorRow]!;
       for (let c = 0; c <= this.cursorCol && c < this.cols; c++) row[c] = blankCell();
+      this.markRange(0, this.cursorRow);
     } else {
       const row = this.screen[this.cursorRow]!;
       for (let c = this.cursorCol; c < this.cols; c++) row[c] = blankCell();
       for (let r = this.cursorRow + 1; r < this.rows; r++) this.screen[r] = makeRow(this.cols);
+      this.markRange(this.cursorRow, this.rows - 1);
     }
-    this.dirty = true;
   }
 
   eraseInLine(mode: number): void {
@@ -227,7 +326,7 @@ export class Grid {
     } else {
       for (let c = this.cursorCol; c < this.cols; c++) row[c] = blankCell();
     }
-    this.dirty = true;
+    this.markRow(this.cursorRow);
   }
 
   scrollUp(n: number): void {
@@ -237,7 +336,9 @@ export class Grid {
       if (gone) this.pushScrollback(gone);
       this.screen.push(makeRow(this.cols));
     }
-    this.dirty = true;
+    // All visible rows' content shifted but absolute indexes are stable;
+    // content at each visible absolute index changed, so mark them all.
+    this.markRange(0, this.rows - 1);
   }
   scrollDown(n: number): void {
     n = Math.max(1, n);
@@ -245,7 +346,7 @@ export class Grid {
       this.screen.pop();
       this.screen.unshift(makeRow(this.cols));
     }
-    this.dirty = true;
+    this.markRange(0, this.rows - 1);
   }
 
   totalLines(): number {
@@ -260,7 +361,8 @@ export class Grid {
 
   clearScrollback(): void {
     this.scrollback = [];
-    this.dirty = true;
+    // All visible-line absolute indexes just shifted down. Safest to repaint.
+    this.markAllVisible();
   }
 
   // Alternate screen buffer support (xterm DEC private modes 47/1047/1048/1049).
@@ -281,7 +383,7 @@ export class Grid {
         this.altReturnRow = this.cursorRow;
         this.altReturnCol = this.cursorCol;
       }
-      this.dirty = true;
+      this.markAllVisible();
       return;
     }
     if (save) {
@@ -295,15 +397,16 @@ export class Grid {
     this.scrollback = [];
     this.inAltScreen = true;
     if (clear) this.blankBuffer(this.screen);
-    this.dirty = true;
+    this.markAllVisible();
   }
 
   exitAltScreen(clear: boolean, restore: boolean): void {
     if (!this.inAltScreen) {
       if (restore) {
-        this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));
-        this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.altReturnCol));
-        this.dirty = true;
+        this.withCursorMove(() => {
+          this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));
+          this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.altReturnCol));
+        });
       }
       return;
     }
@@ -319,7 +422,7 @@ export class Grid {
       this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));
       this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.altReturnCol));
     }
-    this.dirty = true;
+    this.markAllVisible();
   }
 
   // Save/restore cursor pair used by CSI ?1048. Independent of the buffer swap.
@@ -328,9 +431,10 @@ export class Grid {
     this.altReturnCol = this.cursorCol;
   }
   restoreCursorAlt(): void {
-    this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));
-    this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.altReturnCol));
-    this.dirty = true;
+    this.withCursorMove(() => {
+      this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));
+      this.cursorCol = Math.min(this.cols - 1, Math.max(0, this.altReturnCol));
+    });
   }
 
   private blankBuffer(buf: Cell[][]): void {

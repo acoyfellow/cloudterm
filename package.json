@@ -40,6 +40,7 @@
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "bench": "tsx test/bench-paint.ts",
     "smoke": "tsx test/runner.ts"
   },
   "dependencies": {

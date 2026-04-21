@@ -240,7 +240,7 @@ const BASE_CSS = `
 .cloudterm-surface{position:absolute;top:0;left:0;right:0}
 .cloudterm-line{position:absolute;left:0;right:0;white-space:pre;contain:content}
 .cloudterm-line span{white-space:pre}
-.cloudterm-cursor{position:absolute;background:var(--ct-cursor,#7cc4ff);opacity:.4;mix-blend-mode:difference}
+.cloudterm-cursor{position:absolute;background:var(--ct-cursor,#7cc4ff);opacity:.4;mix-blend-mode:difference;pointer-events:none;z-index:1}
 .cloudterm-input{position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;margin:0;resize:none;white-space:pre;overflow:hidden;z-index:0;background:transparent;color:transparent;caret-color:transparent;outline:none}
 .cloudterm:focus-within .cloudterm-cursor{opacity:1}
 `;

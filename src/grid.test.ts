@@ -274,3 +274,121 @@ describe('Grid alt-screen renderer-facing surface', () => {
     expect(grid.totalLines()).toBe(beforeTotal);
   });
 });
+
+describe('Grid per-line dirty tracking', () => {
+  // Drain whatever dirty state has accumulated since creation so tests can
+  // reason about a single subsequent mutation in isolation.
+  function reset(grid: Grid): void {
+    grid.consumeDirty();
+  }
+
+  test('writing one character marks exactly one absolute index dirty', () => {
+    const { grid, write } = makeTerm(20, 6);
+    reset(grid);
+    write('x');
+    const d = grid.consumeDirty();
+    expect(d.dirtyAll).toBe(false);
+    // Cursor started at (0,0); writeChar mutates row 0 and moves cursor
+    // along the same row. Only row 0 should be dirty.
+    const abs = grid.scrollback.length + 0;
+    expect([...d.dirtyLines].sort()).toEqual([abs]);
+  });
+
+  test('consumeDirty resets the set and the dirtyAll flag', () => {
+    const { grid, write } = makeTerm(20, 6);
+    write('abc');
+    const first = grid.consumeDirty();
+    expect(first.dirtyLines.size).toBeGreaterThan(0);
+    // Immediately consuming again yields a clean state.
+    const second = grid.consumeDirty();
+    expect(second.dirtyAll).toBe(false);
+    expect(second.dirtyLines.size).toBe(0);
+    // And `dirty` is cleared.
+    expect(grid.dirty).toBe(false);
+  });
+
+  test('scrolling up shifts dirty abs indexes stably (no off-by-one)', () => {
+    // A lineFeed at the bottom pushes screen[0] to scrollback and appends
+    // a new blank bottom row. Absolute indexes of visible content should
+    // stay stable: the row that was screen[1] with abs=S+1 is now
+    // screen[0] with abs=(S+1)+0=S+1. The new bottom row is fresh and
+    // must be reported dirty under its new abs index.
+    const { grid, write } = makeTerm(10, 3);
+    // Fill 3 rows without overflowing; cursor ends on row 2.
+    write('a\r\nb\r\nc');
+    expect(grid.cursorRow).toBe(2);
+    expect(grid.scrollback.length).toBe(0);
+    reset(grid);
+
+    // LF at bottom -> push to scrollback + new blank bottom row.
+    write('\n');
+    expect(grid.scrollback.length).toBe(1);
+    expect(grid.cursorRow).toBe(2);
+
+    const d = grid.consumeDirty();
+    expect(d.dirtyAll).toBe(false);
+    // The new bottom row's abs index is scrollback.length + cursorRow
+    // = 1 + 2 = 3. That row must be in the dirty set.
+    const newBottomAbs = grid.scrollback.length + grid.cursorRow;
+    expect(d.dirtyLines.has(newBottomAbs)).toBe(true);
+  });
+
+  test('resize marks dirtyAll true', () => {
+    const { grid } = makeTerm(20, 6);
+    reset(grid);
+    grid.resize(30, 8);
+    const d = grid.consumeDirty();
+    expect(d.dirtyAll).toBe(true);
+  });
+
+  test('enterAltScreen marks dirtyAll true', () => {
+    const { grid, write } = makeTerm(20, 6);
+    reset(grid);
+    write(ENTER_1049);
+    const d = grid.consumeDirty();
+    expect(d.dirtyAll).toBe(true);
+  });
+
+  test('exitAltScreen marks dirtyAll true', () => {
+    const { grid, write } = makeTerm(20, 6);
+    write(ENTER_1049);
+    reset(grid);
+    write(EXIT_1049);
+    const d = grid.consumeDirty();
+    expect(d.dirtyAll).toBe(true);
+  });
+
+  test('cursor move to a different line marks both old and new lines dirty', () => {
+    const { grid, write } = makeTerm(20, 6);
+    // Move to a known row first, then consume to clear.
+    write('\x1b[3;5H'); // row 2, col 4 (0-based)
+    reset(grid);
+    const oldRow = grid.cursorRow;
+    // Move down one line (same column).
+    write('\x1b[B');
+    const newRow = grid.cursorRow;
+    expect(newRow).toBe(oldRow + 1);
+    const d = grid.consumeDirty();
+    expect(d.dirtyAll).toBe(false);
+    const oldAbs = grid.scrollback.length + oldRow;
+    const newAbs = grid.scrollback.length + newRow;
+    expect(d.dirtyLines.has(oldAbs)).toBe(true);
+    expect(d.dirtyLines.has(newAbs)).toBe(true);
+    expect(d.dirtyLines.size).toBe(2);
+  });
+
+  test('cursor move within the same line marks only that line dirty', () => {
+    const { grid, write } = makeTerm(20, 6);
+    write('\x1b[3;5H'); // row 2, col 4
+    reset(grid);
+    const row = grid.cursorRow;
+    // Move forward one column (same row).
+    write('\x1b[C');
+    expect(grid.cursorRow).toBe(row);
+    expect(grid.cursorCol).toBe(5);
+    const d = grid.consumeDirty();
+    expect(d.dirtyAll).toBe(false);
+    const abs = grid.scrollback.length + row;
+    expect([...d.dirtyLines]).toEqual([abs]);
+  });
+});

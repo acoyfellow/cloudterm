@@ -205,9 +205,14 @@ export class Grid {
 
   // Move cursor absolute
   setCursor(row: number, col: number): void {
+    const nr = Math.min(this.rows - 1, Math.max(0, row));
+    const nc = Math.min(this.cols - 1, Math.max(0, col));
+    // Skip the move entirely if the cursor is already there. Apps often
+    // re-send CUP on every redraw and most of them are no-ops.
+    if (nr === this.cursorRow && nc === this.cursorCol) return;
     this.withCursorMove(() => {
-      this.cursorRow = Math.min(this.rows - 1, Math.max(0, row));
-      this.cursorCol = Math.min(this.cols - 1, Math.max(0, col));
+      this.cursorRow = nr;
+      this.cursorCol = nc;
     });
   }
 
@@ -225,7 +230,11 @@ export class Grid {
   writeChar(ch: string, attr: CellAttr): void {
     if (this.cursorCol >= this.cols) this.wrapToNextLine();
     const row = this.screen[this.cursorRow]!;
-    row[this.cursorCol] = { ch, attr: { ...attr } };
+    // Share the attr object across adjacent cells. Parser owns attr
+    // lifecycle: it clones on SGR change and hands a stable reference
+    // between changes. Cloning per cell here was burning ~1 allocation
+    // per typed character for zero semantic benefit.
+    row[this.cursorCol] = { ch, attr };
     // Inline markRow to avoid call overhead in the hot path. writeChar
     // is the single most-frequent mutation in any shell session.
     this.dirtyLines.add(this.scrollback.length + this.cursorRow);

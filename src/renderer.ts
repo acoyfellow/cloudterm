@@ -80,14 +80,20 @@ function colorOf(n: number, fallback: string): string {
   return fallback;
 }
 
-function attrKey(a: CellAttr): string {
-  // Fast key to group runs. Boolean bits packed.
-  const flags =
-    (a.bold ? 1 : 0) |
-    (a.italic ? 2 : 0) |
-    (a.underline ? 4 : 0) |
-    (a.reverse ? 8 : 0);
-  return `${a.fg}|${a.bg}|${flags}`;
+// Compare two attrs for run-grouping equality. A shared reference (fast path)
+// is a definite equal; otherwise compare fields. Parser hands the same attr
+// object for every cell between SGR changes, so identity check wins on
+// typical shell output.
+function attrEq(a: CellAttr, b: CellAttr): boolean {
+  if (a === b) return true;
+  return (
+    a.fg === b.fg &&
+    a.bg === b.bg &&
+    a.bold === b.bold &&
+    a.italic === b.italic &&
+    a.underline === b.underline &&
+    a.reverse === b.reverse
+  );
 }
 
 export class DomRenderer {
@@ -273,23 +279,25 @@ export class DomRenderer {
     // only concerns text runs.
     div.textContent = '';
 
-    // Build runs of same-styled cells.
-    let runStart = 0;
-    let runKey = line.length ? attrKey(line[0]!.attr) : '';
-    let runBuf = line.length ? line[0]!.ch : '';
+    if (line.length === 0) return;
+
+    // Build runs of same-styled cells. Attrs are compared by reference
+    // first (Parser + Grid share a single attr reference across adjacent
+    // cells between SGR changes), so typical shell output hits the fast
+    // path on every cell.
+    let runAttr = line[0]!.attr;
+    let runBuf = line[0]!.ch;
     for (let i = 1; i < line.length; i++) {
       const cell = line[i]!;
-      const key = attrKey(cell.attr);
-      if (key === runKey) {
+      if (attrEq(cell.attr, runAttr)) {
         runBuf += cell.ch;
       } else {
-        this.emitRun(div, runBuf, line[runStart]!.attr);
-        runStart = i;
-        runKey = key;
+        this.emitRun(div, runBuf, runAttr);
+        runAttr = cell.attr;
         runBuf = cell.ch;
       }
     }
-    if (runBuf.length) this.emitRun(div, runBuf, line[runStart]!.attr);
+    if (runBuf.length) this.emitRun(div, runBuf, runAttr);
   }
 
   private emitRun(parent: HTMLDivElement, text: string, attr: CellAttr): void {

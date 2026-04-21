@@ -67,8 +67,10 @@ export class AnsiParser {
   private intermediate = '';
   private oscBuf = '';
   private attr: CellAttr = defaultAttr();
-  // Partial UTF-8 buffer for Uint8Array input
-  private utf8Pending: number[] = [];
+  // Streaming UTF-8 decoder. Buffers partial multi-byte sequences across
+  // calls internally, so chunk boundaries in the middle of a codepoint
+  // are handled natively without a userspace pending-bytes array.
+  private utf8Decoder = new TextDecoder('utf-8', { fatal: false });
 
   constructor(private sink: ParserSink) {}
 
@@ -79,7 +81,9 @@ export class AnsiParser {
     this.intermediate = '';
     this.oscBuf = '';
     this.attr = defaultAttr();
-    this.utf8Pending = [];
+    // Flush the streaming decoder so any buffered partial bytes are
+    // dropped on reset.
+    this.utf8Decoder.decode();
   }
 
   getAttr(): CellAttr {
@@ -87,33 +91,8 @@ export class AnsiParser {
   }
 
   writeBytes(bytes: Uint8Array): void {
-    // Decode UTF-8 incrementally. Stash partials.
-    const chunk = this.utf8Pending.length
-      ? new Uint8Array([...this.utf8Pending, ...bytes])
-      : bytes;
-    this.utf8Pending = [];
-    // Find last incomplete UTF-8 sequence
-    let safeEnd = chunk.length;
-    // Look back up to 3 bytes
-    for (let i = chunk.length - 1; i >= Math.max(0, chunk.length - 3); i--) {
-      const b = chunk[i]!;
-      if (b < 0x80) break; // ASCII terminator, chunk is fine
-      if (b >= 0xc0) {
-        // Start byte. Determine required length.
-        const needed =
-          b < 0xe0 ? 2 : b < 0xf0 ? 3 : b < 0xf8 ? 4 : 1;
-        const remaining = chunk.length - i;
-        if (remaining < needed) {
-          safeEnd = i;
-          for (let j = i; j < chunk.length; j++) this.utf8Pending.push(chunk[j]!);
-        }
-        break;
-      }
-    }
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(
-      chunk.subarray(0, safeEnd),
-    );
-    this.writeString(text);
+    const text = this.utf8Decoder.decode(bytes, { stream: true });
+    if (text.length > 0) this.writeString(text);
   }
 
   writeString(text: string): void {
@@ -401,71 +380,79 @@ export class AnsiParser {
   }
 
   private handleSgr(): void {
+    // SGR produces a new attr object. Grid.writeChar stores a shared
+    // reference across adjacent cells, so the attr must be immutable
+    // once handed to the sink. Mutating would retroactively repaint
+    // cells written under the previous attr.
     const ps = this.params;
     if (ps.length === 0 || (ps.length === 1 && ps[0]! < 0)) {
       this.attr = defaultAttr();
       this.sink.setAttr(this.attr);
       return;
     }
+    // Start from a copy of the current attr so incremental flags accumulate
+    // correctly across this single SGR sequence.
+    const next: CellAttr = { ...this.attr };
     for (let i = 0; i < ps.length; i++) {
       let n = ps[i]!;
       if (n < 0) n = 0;
       if (n === 0) {
-        this.attr = defaultAttr();
+        Object.assign(next, defaultAttr());
       } else if (n === 1) {
-        this.attr.bold = true;
+        next.bold = true;
       } else if (n === 3) {
-        this.attr.italic = true;
+        next.italic = true;
       } else if (n === 4) {
-        this.attr.underline = true;
+        next.underline = true;
       } else if (n === 7) {
-        this.attr.reverse = true;
+        next.reverse = true;
       } else if (n === 22) {
-        this.attr.bold = false;
+        next.bold = false;
       } else if (n === 23) {
-        this.attr.italic = false;
+        next.italic = false;
       } else if (n === 24) {
-        this.attr.underline = false;
+        next.underline = false;
       } else if (n === 27) {
-        this.attr.reverse = false;
+        next.reverse = false;
       } else if (n >= 30 && n <= 37) {
-        this.attr.fg = n - 30;
+        next.fg = n - 30;
       } else if (n === 38) {
-        const next = ps[i + 1];
-        if (next === 5 && ps[i + 2] !== undefined) {
-          this.attr.fg = ps[i + 2]!;
+        const nx = ps[i + 1];
+        if (nx === 5 && ps[i + 2] !== undefined) {
+          next.fg = ps[i + 2]!;
           i += 2;
-        } else if (next === 2 && ps[i + 4] !== undefined) {
+        } else if (nx === 2 && ps[i + 4] !== undefined) {
           const r = ps[i + 2]! & 0xff;
           const g = ps[i + 3]! & 0xff;
           const b = ps[i + 4]! & 0xff;
-          this.attr.fg = 0x01000000 | (r << 16) | (g << 8) | b;
+          next.fg = 0x01000000 | (r << 16) | (g << 8) | b;
           i += 4;
         }
       } else if (n === 39) {
-        this.attr.fg = -1;
+        next.fg = -1;
       } else if (n >= 40 && n <= 47) {
-        this.attr.bg = n - 40;
+        next.bg = n - 40;
       } else if (n === 48) {
-        const next = ps[i + 1];
-        if (next === 5 && ps[i + 2] !== undefined) {
-          this.attr.bg = ps[i + 2]!;
+        const nx = ps[i + 1];
+        if (nx === 5 && ps[i + 2] !== undefined) {
+          next.bg = ps[i + 2]!;
           i += 2;
-        } else if (next === 2 && ps[i + 4] !== undefined) {
+        } else if (nx === 2 && ps[i + 4] !== undefined) {
           const r = ps[i + 2]! & 0xff;
           const g = ps[i + 3]! & 0xff;
           const b = ps[i + 4]! & 0xff;
-          this.attr.bg = 0x01000000 | (r << 16) | (g << 8) | b;
+          next.bg = 0x01000000 | (r << 16) | (g << 8) | b;
           i += 4;
         }
       } else if (n === 49) {
-        this.attr.bg = -1;
+        next.bg = -1;
       } else if (n >= 90 && n <= 97) {
-        this.attr.fg = n - 90 + 8;
+        next.fg = n - 90 + 8;
       } else if (n >= 100 && n <= 107) {
-        this.attr.bg = n - 100 + 8;
+        next.bg = n - 100 + 8;
       }
     }
+    this.attr = next;
     this.sink.setAttr(this.attr);
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "cloudterm",
   "version": "0.0.1",
-  "description": "Web terminal emulator. DOM-rendered. Built on @chenglou/pretext.",
+  "description": "Tiny DOM-rendered terminal emulator for the web.",
   "author": "Jordan Coeyman <jordan@coey.dev>",
   "license": "MIT",
   "type": "module",
@@ -9,7 +9,7 @@
     "type": "git",
     "url": "git+https://github.com/acoyfellow/cloudterm.git"
   },
-  "homepage": "https://github.com/acoyfellow/cloudterm",
+  "homepage": "https://termlab.coey.dev/",
   "bugs": "https://github.com/acoyfellow/cloudterm/issues",
   "keywords": [
     "terminal",
@@ -17,7 +17,9 @@
     "xterm",
     "dom",
     "pretext",
-    "emulator"
+    "emulator",
+    "web-terminal",
+    "pty"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -59,5 +61,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "sideEffects": false
+  "sideEffects": [
+    "./dist/style.css"
+  ]
 }

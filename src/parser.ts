@@ -66,7 +66,10 @@ const S_ESC = 1;
 const S_CSI = 2;
 const S_OSC = 3;
 const S_OSC_ESC = 4; // seen ESC inside OSC, expecting \
-type S = 0 | 1 | 2 | 3 | 4;
+const S_ESC_AWAITING_CHARSET_FINAL = 5;
+const S_IGNORED_CONTROL_STRING = 6;
+const S_IGNORED_CONTROL_STRING_ESC = 7;
+type S = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 export class AnsiParser {
   private state: S = S_GROUND;
@@ -125,14 +128,24 @@ export class AnsiParser {
       case S_OSC:
         this.osc(ch, code);
         return;
+      case S_ESC_AWAITING_CHARSET_FINAL:
+        this.state = S_GROUND;
+        return;
       case S_OSC_ESC:
         if (ch === '\\') {
           this.dispatchOsc();
-        } else {
-          this.oscBuf += '\x1b';
-          this.oscBuf += ch;
+          return;
         }
+        this.oscBuf += '\x1b';
+        this.oscBuf += ch;
         this.state = S_OSC;
+        return;
+      case S_IGNORED_CONTROL_STRING:
+        if (code === 0x07) this.state = S_GROUND;
+        else if (code === 0x1b) this.state = S_IGNORED_CONTROL_STRING_ESC;
+        return;
+      case S_IGNORED_CONTROL_STRING_ESC:
+        this.state = ch === '\\' ? S_GROUND : S_IGNORED_CONTROL_STRING;
         return;
     }
   }
@@ -179,6 +192,14 @@ export class AnsiParser {
     if (ch === ']') {
       this.oscBuf = '';
       this.state = S_OSC;
+      return;
+    }
+    if (code >= 0x20 && code <= 0x2f) {
+      this.state = S_ESC_AWAITING_CHARSET_FINAL;
+      return;
+    }
+    if (ch === 'P' || ch === 'X' || ch === '^' || ch === '_') {
+      this.state = S_IGNORED_CONTROL_STRING;
       return;
     }
     // Simple ESC sequences

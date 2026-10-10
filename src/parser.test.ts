@@ -110,3 +110,40 @@ describe('AnsiParser defaultAttr', () => {
     expect(a).toEqual(b);
   });
 });
+
+describe('AnsiParser charset designation (ESC ( B)', () => {
+  test('ESC ( B does not print the B', () => {
+    let printed = '';
+    const parser = new AnsiParser(makeSink({ print: (ch: string) => { printed += ch; } }));
+    parser.writeString('\x1b(B\x1b[mhi');
+    expect(printed).toBe('hi');
+  });
+
+  test('tmux attach stream prints the shell prompt', () => {
+    let printed = '';
+    const parser = new AnsiParser(makeSink({ print: (ch: string) => { printed += ch; } }));
+    parser.writeString('\x1b[?2004h\x1b(B\x1b[m\x1b[1;1Hbash-5.3# ');
+    expect(printed).toBe('bash-5.3# ');
+  });
+});
+
+describe('AnsiParser string terminators', () => {
+  const printedAfter = (input: string) => {
+    let printed = '';
+    const parser = new AnsiParser(makeSink({ print: (ch: string) => { printed += ch; } }));
+    parser.writeString(input);
+    return printed;
+  };
+
+  test('OSC ended by ST returns to ground', () => {
+    expect(printedAfter('\x1b]11;?\x1b\\hello')).toBe('hello');
+  });
+
+  test('DCS string is dropped up to ST', () => {
+    expect(printedAfter('\x1bP>|tmux 3.5a\x1b\\hello')).toBe('hello');
+  });
+
+  test('tmux color queries do not swallow the screen', () => {
+    expect(printedAfter('\x1b]10;?\x1b\\\x1b]11;?\x1b\\bash-5.3# ')).toBe('bash-5.3# ');
+  });
+});

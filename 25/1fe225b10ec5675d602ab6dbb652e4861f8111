@@ -1,0 +1,23 @@
+dist/index.js
+  s_d58794dec92dc7::t_803f20778bb705 1
+src/parser.test.ts
+  s_d58794dec92dc7::t_bf6585ac68bc9e 113-149
+src/parser.ts
+  s_d58794dec92dc7::t_252bdfc546285e 69-72,131-133,137,139-140,143-149,197-204
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "251fe225b10ec5675d602ab6dbb652e4861f8111",
+  "prompts": {},
+  "sessions": {
+    "s_d58794dec92dc7": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a115e6-5bb3-75ac-b511-2988f1aebfad",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Jordan Coeyman <jcoeyman@cloudflare.com>"
+    }
+  }
+}

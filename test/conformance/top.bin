@@ -1,0 +1,52 @@
+[?1h=[H[2J[?12l[?25h[?1000l[?1002l[?1003l[?1006l[?1005l[?2004h(B[m[?12l[?25h[?1006l[?1000l[?1002l[?1003l[1;1H[1;24r[c[>c[>q]10;?\]11;?\[1;1H[?25l[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?12l[?25h[H(B[m[?12l[?25h[?1006l[?1000l[?1002l[?1003l[1;1H[1;24r[1;1H[?25l[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K[?12l[?25h[Hbash-5.3# busybox top -n 1 | head -5
+[J[H[KMem: 5017900K used, 1034932K free, 6724K shrd, 204172K buff, 3552144K cached
+CPU:  2.3% usr  0.0% sys  0.0% nic 97.6% idle  0.0% io  0.0% irq  0.0% sirq
+Load average: 0.03 0.08 0.04 2/615 308
+[7m  PID  PPID USER     STAT   VSZ %VSZ CPU %CPU COMMAND
+(B[m  308   306 root     S     239m  4.0   2  2.3 {/sandbox/bin/he} /sandbox/bin/hea[6;1Hbash-5.3# 

@@ -68,6 +68,9 @@ export class Grid {
   private savedRow = 0;
   private savedCol = 0;
 
+  scrollTop = 0;
+  scrollBottom = 0;
+
   // Alternate screen buffer state. When inAltScreen is true, `screen` points
   // at the alt buffer and `scrollback` is an empty array. The main-screen
   // buffer + real scrollback are stashed in the `main*` fields until exit.
@@ -98,6 +101,102 @@ export class Grid {
     this.maxScrollback = Math.max(0, maxScrollback);
     this.screen = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.altScreen = Array.from({ length: this.rows }, () => makeRow(this.cols));
+    this.scrollBottom = this.rows - 1;
+  }
+
+  private get regionIsFullScreen(): boolean {
+    return this.scrollTop === 0 && this.scrollBottom === this.rows - 1;
+  }
+
+  setScrollRegion(top: number, bottom: number): void {
+    const t = Math.max(0, Math.min(this.rows - 1, top));
+    const b = Math.max(0, Math.min(this.rows - 1, bottom));
+    if (t >= b) {
+      this.scrollTop = 0;
+      this.scrollBottom = this.rows - 1;
+    } else {
+      this.scrollTop = t;
+      this.scrollBottom = b;
+    }
+    this.setCursorForced(0, 0);
+  }
+
+  private setCursorForced(row: number, col: number): void {
+    this.withCursorMove(() => {
+      this.cursorRow = Math.min(this.rows - 1, Math.max(0, row));
+      this.cursorCol = Math.min(this.cols - 1, Math.max(0, col));
+    });
+  }
+
+  private scrollRegionUp(top: number, bottom: number, n: number): void {
+    const count = Math.min(n, bottom - top + 1);
+    for (let i = 0; i < count; i++) {
+      const [gone] = this.screen.splice(top, 1);
+      if (gone && top === 0 && bottom === this.rows - 1) this.pushScrollback(gone);
+      this.screen.splice(bottom, 0, makeRow(this.cols));
+    }
+    this.markRange(top, bottom);
+  }
+
+  private scrollRegionDown(top: number, bottom: number, n: number): void {
+    const count = Math.min(n, bottom - top + 1);
+    for (let i = 0; i < count; i++) {
+      this.screen.splice(bottom, 1);
+      this.screen.splice(top, 0, makeRow(this.cols));
+    }
+    this.markRange(top, bottom);
+  }
+
+  cursorRowAbsolute(row: number): void {
+    this.setCursorForced(row, this.cursorCol);
+  }
+
+  insertLines(n: number): void {
+    if (this.cursorRow < this.scrollTop || this.cursorRow > this.scrollBottom) return;
+    this.scrollRegionDown(this.cursorRow, this.scrollBottom, Math.max(1, n));
+    this.cursorCol = 0;
+  }
+
+  deleteLines(n: number): void {
+    if (this.cursorRow < this.scrollTop || this.cursorRow > this.scrollBottom) return;
+    const count = Math.min(Math.max(1, n), this.scrollBottom - this.cursorRow + 1);
+    for (let i = 0; i < count; i++) {
+      this.screen.splice(this.cursorRow, 1);
+      this.screen.splice(this.scrollBottom, 0, makeRow(this.cols));
+    }
+    this.markRange(this.cursorRow, this.scrollBottom);
+    this.cursorCol = 0;
+  }
+
+  insertChars(n: number): void {
+    const row = this.screen[this.cursorRow]!;
+    const col = Math.min(this.cursorCol, this.cols - 1);
+    const count = Math.min(Math.max(1, n), this.cols - col);
+    row.splice(col, 0, ...Array.from({ length: count }, blankCell));
+    row.length = this.cols;
+    this.markRow(this.cursorRow);
+  }
+
+  deleteChars(n: number): void {
+    const row = this.screen[this.cursorRow]!;
+    const col = Math.min(this.cursorCol, this.cols - 1);
+    const count = Math.min(Math.max(1, n), this.cols - col);
+    row.splice(col, count);
+    while (row.length < this.cols) row.push(blankCell());
+    this.markRow(this.cursorRow);
+  }
+
+  eraseChars(n: number): void {
+    const row = this.screen[this.cursorRow]!;
+    const col = Math.min(this.cursorCol, this.cols - 1);
+    const end = Math.min(this.cols, col + Math.max(1, n));
+    for (let c = col; c < end; c++) row[c] = blankCell();
+    this.markRow(this.cursorRow);
+  }
+
+  reverseIndex(): void {
+    if (this.cursorRow === this.scrollTop) this.scrollRegionDown(this.scrollTop, this.scrollBottom, 1);
+    else this.cursorUp(1);
   }
 
   // Absolute line index of the given screen row. Stable reference the renderer
@@ -162,6 +261,8 @@ export class Grid {
 
     this.cols = cols;
     this.rows = rows;
+    this.scrollTop = 0;
+    this.scrollBottom = rows - 1;
     if (this.cursorRow >= rows) this.cursorRow = rows - 1;
     if (this.cursorCol >= cols) this.cursorCol = cols - 1;
     this.markAllVisible();
@@ -260,6 +361,10 @@ export class Grid {
   }
 
   lineFeed(): void {
+    if (this.cursorRow === this.scrollBottom && !this.regionIsFullScreen) {
+      this.scrollRegionUp(this.scrollTop, this.scrollBottom, 1);
+      return;
+    }
     if (this.cursorRow < this.rows - 1) {
       // Simple move down. Mark both old and new rows for cursor movement.
       this.markRow(this.cursorRow);
@@ -280,6 +385,7 @@ export class Grid {
   }
 
   backspace(): void {
+    if (this.cursorCol >= this.cols) this.cursorCol = this.cols - 1;
     if (this.cursorCol > 0) {
       this.cursorCol -= 1;
       this.markRow(this.cursorRow);
@@ -287,6 +393,7 @@ export class Grid {
   }
 
   tab(): void {
+    if (this.cursorCol >= this.cols) this.cursorCol = this.cols - 1;
     const next = (Math.floor(this.cursorCol / 8) + 1) * 8;
     this.cursorCol = Math.min(this.cols - 1, next);
     this.markRow(this.cursorRow);
@@ -345,6 +452,10 @@ export class Grid {
 
   scrollUp(n: number): void {
     n = Math.max(1, n);
+    if (!this.regionIsFullScreen) {
+      this.scrollRegionUp(this.scrollTop, this.scrollBottom, n);
+      return;
+    }
     for (let i = 0; i < n; i++) {
       const gone = this.screen.shift();
       if (gone) this.pushScrollback(gone);
@@ -356,6 +467,10 @@ export class Grid {
   }
   scrollDown(n: number): void {
     n = Math.max(1, n);
+    if (!this.regionIsFullScreen) {
+      this.scrollRegionDown(this.scrollTop, this.scrollBottom, n);
+      return;
+    }
     for (let i = 0; i < n; i++) {
       this.screen.pop();
       this.screen.unshift(makeRow(this.cols));

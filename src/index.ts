@@ -85,8 +85,10 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
 
   // Parser wired to grid.
   let currentAttr: CellAttr = defaultAttr();
+  let lastPrinted = ' ';
   const sink: ParserSink = {
     print(ch) {
+      lastPrinted = ch;
       if (predictions) {
         reconcilePrint(ch);
       } else {
@@ -163,6 +165,44 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     scrollDown(n) {
       grid.scrollDown(n);
       if (predictions) predictions.clear();
+    },
+    setScrollRegion(top, bottom) {
+      grid.setScrollRegion(top - 1, bottom === 0 ? grid.rows - 1 : bottom - 1);
+      if (predictions) predictions.clear();
+    },
+    cursorRow(row) {
+      grid.cursorRowAbsolute(row - 1);
+      reconcileCursor();
+    },
+    insertLines(n) {
+      grid.insertLines(n);
+      if (predictions) predictions.clear();
+    },
+    deleteLines(n) {
+      grid.deleteLines(n);
+      if (predictions) predictions.clear();
+    },
+    insertChars(n) {
+      grid.insertChars(n);
+      if (predictions) predictions.clear();
+    },
+    deleteChars(n) {
+      grid.deleteChars(n);
+      if (predictions) predictions.clear();
+    },
+    eraseChars(n) {
+      grid.eraseChars(n);
+      if (predictions) predictions.clear();
+    },
+    reverseIndex() {
+      grid.reverseIndex();
+      if (predictions) predictions.clear();
+    },
+    repeatLast(n) {
+      for (let i = 0; i < Math.min(n, grid.cols * grid.rows); i++) {
+        if (predictions) reconcilePrint(lastPrinted);
+        else grid.writeChar(lastPrinted, currentAttr);
+      }
     },
     saveCursor() {
       grid.saveCursor();

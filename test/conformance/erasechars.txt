@@ -1,0 +1,25 @@
+bash-5.3# printf 'abcdefgh\033[4D\033[2X\n'
+abcd  gh
+bash-5.3#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<<cursor 2,10>>

@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { createHeadless } from './headless.js';
-import type { Grid } from './grid.js';
+import { Grid } from './grid.js';
+import { defaultAttr } from './parser.js';
 import { PredictionBuffer } from './predict.js';
 
 // Drive a real Grid through the real AnsiParser via createHeadless, the
@@ -481,5 +482,60 @@ describe('PredictionBuffer integration with headless grid', () => {
     h.feedString('b');
     buf.onGridPrint(r, c, 'b');
     expect(buf.size).toBe(0);
+  });
+});
+
+describe('Grid scroll region and line editing', () => {
+  const text = (g: Grid) => {
+    const out: string[] = [];
+    for (let r = 0; r < g.rows; r++) out.push(g.getLine(g.scrollback.length + r).map((c) => c.ch).join('').trimEnd());
+    return out;
+  };
+  const fill = (g: Grid, lines: string[]) => {
+    lines.forEach((line, r) => {
+      g.setCursor(r, 0);
+      for (const ch of line) g.writeChar(ch, defaultAttr());
+    });
+  };
+
+  test('line feed at the region bottom scrolls only the region', () => {
+    const g = new Grid(4, 4, 100);
+    fill(g, ['a', 'b', 'c', 'd']);
+    g.setScrollRegion(1, 2);
+    g.setCursor(2, 0);
+    g.lineFeed();
+    expect(text(g)).toEqual(['a', 'c', '', 'd']);
+    expect(g.scrollback.length).toBe(0);
+  });
+
+  test('insert and delete lines stay inside the region', () => {
+    const g = new Grid(4, 4, 100);
+    fill(g, ['a', 'b', 'c', 'd']);
+    g.setCursor(1, 0);
+    g.insertLines(1);
+    expect(text(g)).toEqual(['a', '', 'b', 'c']);
+    g.deleteLines(2);
+    expect(text(g)).toEqual(['a', 'c', '', '']);
+  });
+
+  test('insert, delete, and erase characters', () => {
+    const g = new Grid(6, 1, 0);
+    fill(g, ['abcdef']);
+    g.setCursor(0, 2);
+    g.deleteChars(2);
+    expect(text(g)).toEqual(['abef']);
+    g.insertChars(1);
+    expect(text(g)).toEqual(['ab ef']);
+    g.setCursor(0, 0);
+    g.eraseChars(2);
+    expect(text(g)).toEqual(['   ef']);
+  });
+
+  test('reverse index at the region top scrolls the region down', () => {
+    const g = new Grid(4, 3, 0);
+    fill(g, ['a', 'b', 'c']);
+    g.setCursor(0, 0);
+    g.reverseIndex();
+    expect(text(g)).toEqual(['', 'a', 'b']);
   });
 });

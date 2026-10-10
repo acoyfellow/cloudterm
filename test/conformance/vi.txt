@@ -1,0 +1,25 @@
+line one
+line three
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+~
+Delete 1 lines (9 chars) from [D]
+<<cursor 1,0>>

@@ -1,0 +1,25 @@
+bash-5.3# echo after-clear
+after-clear
+bash-5.3#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<<cursor 2,10>>

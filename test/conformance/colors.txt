@@ -1,0 +1,25 @@
+bash-5.3# printf '\033[31mred\033[0m \033[1;32mbold green\033[0m \033[38;5;208mo
+range\033[0m\n'
+red bold green orange
+bash-5.3#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<<cursor 3,10>>

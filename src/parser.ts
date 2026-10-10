@@ -34,6 +34,15 @@ export interface ParserSink {
   eraseInLine(mode: number): void;
   scrollUp(n: number): void;
   scrollDown(n: number): void;
+  setScrollRegion(top: number, bottom: number): void;
+  cursorRow(row: number): void;
+  insertLines(n: number): void;
+  deleteLines(n: number): void;
+  insertChars(n: number): void;
+  deleteChars(n: number): void;
+  eraseChars(n: number): void;
+  reverseIndex(): void;
+  repeatLast(n: number): void;
   saveCursor(): void;
   restoreCursor(): void;
   setAttr(attr: CellAttr): void;
@@ -218,7 +227,7 @@ export class AnsiParser {
         this.sink.lineFeed();
         break;
       case 'M':
-        this.sink.scrollDown(1);
+        this.sink.reverseIndex();
         break;
       case 'c':
         this.reset();
@@ -338,19 +347,44 @@ export class AnsiParser {
         this.sink.cursorPosition(this.p(0, 1), this.p(1, 1));
         return;
       case 'J':
+        if (isPrivate) return;
         this.sink.eraseInDisplay(this.p(0, 0));
         return;
       case 'K':
         this.sink.eraseInLine(this.p(0, 0));
         return;
       case 'S':
+        if (isPrivate) return;
         this.sink.scrollUp(this.p(0, 1));
         return;
       case 'T':
         this.sink.scrollDown(this.p(0, 1));
         return;
       case 'd':
-        // row (VPA) — approximate as cursorPosition(row, currentCol). Skip for v1.
+        this.sink.cursorRow(this.p(0, 1));
+        return;
+      case 'r':
+        if (isPrivate) return;
+        this.sink.setScrollRegion(this.p(0, 1), this.p(1, 0));
+        return;
+      case 'L':
+        this.sink.insertLines(this.p(0, 1));
+        return;
+      case 'M':
+        this.sink.deleteLines(this.p(0, 1));
+        return;
+      case '@':
+        if (this.intermediate !== '') return;
+        this.sink.insertChars(this.p(0, 1));
+        return;
+      case 'P':
+        this.sink.deleteChars(this.p(0, 1));
+        return;
+      case 'X':
+        this.sink.eraseChars(this.p(0, 1));
+        return;
+      case 'b':
+        this.sink.repeatLast(this.p(0, 1));
         return;
       case 'm':
         if (!isPrivate) this.handleSgr();
@@ -402,9 +436,11 @@ export class AnsiParser {
         return;
       }
       case 's':
+        if (isPrivate) return;
         this.sink.saveCursor();
         return;
       case 'u':
+        if (isPrivate) return;
         this.sink.restoreCursor();
         return;
       default:

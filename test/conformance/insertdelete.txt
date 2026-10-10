@@ -1,0 +1,25 @@
+bash-5.3# printf 'abcdef\033[3D\033[2P\033[1@X\n'
+abcXf
+bash-5.3# printf 'line1\nline2\nline3\033[2A\033[1L\033[1M\n\n\n'
+line1
+line2
+line3
+bash-5.3#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<<cursor 6,10>>

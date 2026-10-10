@@ -1,0 +1,25 @@
+bash-5.3# printf 'héllo wörld → ✓ 日本語\n'
+héllo wörld → ✓ 日本語
+bash-5.3#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<<cursor 2,10>>

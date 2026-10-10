@@ -51,9 +51,11 @@ export function createHeadless(
   const titles: string[] = [];
   const cwds: string[] = [];
   let bells = 0;
+  let lastPrinted = ' ';
 
   const sink: ParserSink = {
     print(ch) {
+      lastPrinted = ch;
       grid.writeChar(ch, currentAttr);
     },
     lineFeed() {
@@ -108,6 +110,33 @@ export function createHeadless(
     },
     scrollDown(n) {
       grid.scrollDown(n);
+    },
+    setScrollRegion(top, bottom) {
+      grid.setScrollRegion(top - 1, bottom === 0 ? grid.rows - 1 : bottom - 1);
+    },
+    cursorRow(row) {
+      grid.cursorRowAbsolute(row - 1);
+    },
+    insertLines(n) {
+      grid.insertLines(n);
+    },
+    deleteLines(n) {
+      grid.deleteLines(n);
+    },
+    insertChars(n) {
+      grid.insertChars(n);
+    },
+    deleteChars(n) {
+      grid.deleteChars(n);
+    },
+    eraseChars(n) {
+      grid.eraseChars(n);
+    },
+    reverseIndex() {
+      grid.reverseIndex();
+    },
+    repeatLast(n) {
+      for (let i = 0; i < Math.min(n, grid.cols * grid.rows); i++) grid.writeChar(lastPrinted, currentAttr);
     },
     saveCursor() {
       grid.saveCursor();

@@ -1,0 +1,25 @@
+bash-5.3# printf '\033[3d\033[5Gvpa-here\n'
+
+    vpa-here
+bash-5.3#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<<cursor 3,10>>

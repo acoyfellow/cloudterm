@@ -1,0 +1,25 @@
+bash-5.3# echo hello
+hello
+bash-5.3#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<<cursor 2,10>>

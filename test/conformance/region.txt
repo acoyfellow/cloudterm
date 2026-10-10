@@ -1,0 +1,25 @@
+bash-5.3# echo after-regionr\033[10;1H\n\n\033[r'
+after-region
+bash-5.3#
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<<cursor 2,10>>

@@ -1,0 +1,91 @@
+dist/index.js
+  s_d58794dec92dc7::t_b4fdbf066a77a7 1
+src/conformance.test.ts
+  s_d58794dec92dc7::t_5d697e5ae81b7f 1-38
+src/grid.test.ts
+  s_d58794dec92dc7::t_65380f755caaee 3-4,487-541
+src/grid.ts
+  s_d58794dec92dc7::t_34b766efffeb45 71-73,104-199,264-265,364-367,388,396,455-458,470-473
+src/headless.ts
+  s_d58794dec92dc7::t_dfa99eac4c4c3d 54,58,114-140
+src/index.ts
+  s_d58794dec92dc7::t_064b12879b9db3 88,91,169-206
+src/parser.ts
+  s_d58794dec92dc7::t_88cc82e22c6bd1 37-45,230,350,357,364-387,439,443
+test/conformance/clear.bin
+  s_d58794dec92dc7::t_3a161e4cc2a31b 1-61
+test/conformance/clear.txt
+  s_d58794dec92dc7::t_7ae0dc699b7036 1-25
+test/conformance/colors.bin
+  s_d58794dec92dc7::t_2d54ac9d21e125 1-49
+test/conformance/colors.txt
+  s_d58794dec92dc7::t_62192fd10916c4 1-25
+test/conformance/erasechars.bin
+  s_d58794dec92dc7::t_b57d2c820156ec 1-49
+test/conformance/erasechars.txt
+  s_d58794dec92dc7::t_c9ad349f64ec7f 1-25
+test/conformance/insertdelete.bin
+  s_d58794dec92dc7::t_bafcee5483a2ba 1-52
+test/conformance/insertdelete.txt
+  s_d58794dec92dc7::t_358fddfe819200 1-25
+test/conformance/less.bin
+  s_d58794dec92dc7::t_432c07d360766b 1-118
+test/conformance/less.txt
+  s_d58794dec92dc7::t_4d79d3ff26f9a0 1-25
+test/conformance/ls.bin
+  s_d58794dec92dc7::t_b0300abaa9faa4 1-61
+test/conformance/ls.txt
+  s_d58794dec92dc7::t_20bf6d176620d9 1-25
+test/conformance/prompt.bin
+  s_d58794dec92dc7::t_3f2602f2275eca 1-49
+test/conformance/prompt.txt
+  s_d58794dec92dc7::t_016586be5a56ad 1-25
+test/conformance/region.bin
+  s_d58794dec92dc7::t_ed8f5fd070e61c 1-51
+test/conformance/region.txt
+  s_d58794dec92dc7::t_c2baa63e84486c 1-25
+test/conformance/scroll.bin
+  s_d58794dec92dc7::t_eebf2531e6d545 1-71
+test/conformance/scroll.txt
+  s_d58794dec92dc7::t_ae728e8c8370f9 1-25
+test/conformance/tabs.bin
+  s_d58794dec92dc7::t_0145ab1bfe1d2d 1-50
+test/conformance/tabs.txt
+  s_d58794dec92dc7::t_ef59eaf24a15ff 1-25
+test/conformance/top.bin
+  s_d58794dec92dc7::t_ca2c0bcbead2d1 1-52
+test/conformance/top.txt
+  s_d58794dec92dc7::t_4a5ee94b37c903 1-25
+test/conformance/unicode.bin
+  s_d58794dec92dc7::t_330fe997fd246a 1-49
+test/conformance/unicode.txt
+  s_d58794dec92dc7::t_ca380900667a03 1-25
+test/conformance/vi.bin
+  s_d58794dec92dc7::t_1b1846916f9958 1-96
+test/conformance/vi.txt
+  s_d58794dec92dc7::t_196e33735e519b 1-25
+test/conformance/vpa.bin
+  s_d58794dec92dc7::t_6af7c1f208d780 1-49
+test/conformance/vpa.txt
+  s_d58794dec92dc7::t_e1063645ee0427 1-25
+test/conformance/wrap.bin
+  s_d58794dec92dc7::t_054979e9dab6db 1-49
+test/conformance/wrap.txt
+  s_d58794dec92dc7::t_f30f44338d0a66 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2fbaeb404a7c3a977159bfed75c439f0ca60a362",
+  "prompts": {},
+  "sessions": {
+    "s_d58794dec92dc7": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a115e6-5bb3-75ac-b511-2988f1aebfad",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Jordan Coeyman <jcoeyman@cloudflare.com>"
+    }
+  }
+}

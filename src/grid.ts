@@ -387,6 +387,29 @@ export class Grid {
     });
   }
 
+  writeAscii(text: string, attr: CellAttr): void {
+    let dirtyLine = -1;
+    for (let index = 0; index < text.length; index++) {
+      if (this.pendingWrap) this.wrapToNextLine();
+      const row = this.screen[this.cursorRow]!;
+      const existing = row[this.cursorCol]!;
+      if (existing.ch === '' || (existing.ch.charCodeAt(0) > 127 && wcwidth(existing.ch) === 2)) {
+        this.clearCell(row, this.cursorCol);
+      }
+      row[this.cursorCol] = internCell(text[index]!, attr);
+      const line = this.absOf(this.cursorRow);
+      if (line !== dirtyLine) {
+        this.markRow(this.cursorRow);
+        dirtyLine = line;
+      }
+      if (this.cursorCol === this.cols - 1) {
+        this.pendingWrap = this.autoWrapMode;
+      } else {
+        this.cursorCol += 1;
+      }
+    }
+  }
+
   writeChar(ch: string, attr: CellAttr): void {
     const width = wcwidth(ch);
     if (width === 0) {

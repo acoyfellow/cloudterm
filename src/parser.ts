@@ -16,6 +16,7 @@ export function defaultAttr(): CellAttr {
 
 export interface ParserSink {
   print(ch: string): void;
+  printRun?(text: string): void;
   lineFeed(): void;
   carriageReturn(): void;
   backspace(): void;
@@ -132,23 +133,35 @@ export class AnsiParser {
       }
       this.pendingHighSurrogate = '';
     }
-    for (; index < text.length; index++) {
+    while (index < text.length) {
       const first = text.charCodeAt(index);
+      if (this.state === S_GROUND && first >= 0x20 && first <= 0x7e) {
+        const start = index;
+        do {
+          index += 1;
+        } while (index < text.length && text.charCodeAt(index) >= 0x20 && text.charCodeAt(index) <= 0x7e);
+        const run = text.slice(start, index);
+        if (this.sink.printRun) this.sink.printRun(run);
+        else for (const ch of run) this.sink.print(ch);
+        continue;
+      }
       if (first >= 0xd800 && first <= 0xdbff) {
         if (index + 1 < text.length) {
           const second = text.charCodeAt(index + 1);
           if (second >= 0xdc00 && second <= 0xdfff) {
             const ch = text.slice(index, index + 2);
             this.step(ch, ch.codePointAt(0)!);
-            index += 1;
+            index += 2;
             continue;
           }
         }
         this.pendingHighSurrogate = text[index]!;
+        index += 1;
         continue;
       }
       const ch = text[index]!;
       this.step(ch, first);
+      index += 1;
     }
   }
 

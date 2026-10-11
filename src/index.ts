@@ -96,6 +96,14 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
         grid.writeChar(ch, currentAttr);
       }
     },
+    printRun(text) {
+      lastPrinted = text[text.length - 1]!;
+      if (predictions?.size) {
+        for (const ch of text) reconcilePrint(ch);
+      } else {
+        grid.writeAscii(text, currentAttr);
+      }
+    },
     lineFeed() {
       grid.lineFeed();
       reconcileCursor();

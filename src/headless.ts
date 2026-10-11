@@ -58,6 +58,10 @@ export function createHeadless(
       lastPrinted = ch;
       grid.writeChar(ch, currentAttr);
     },
+    printRun(text) {
+      lastPrinted = text[text.length - 1]!;
+      grid.writeAscii(text, currentAttr);
+    },
     lineFeed() {
       grid.lineFeed();
     },

@@ -35,6 +35,64 @@ const EXIT_47 = '\x1b[?47l';
 const SAVE_1048 = '\x1b[?1048h';
 const RESTORE_1048 = '\x1b[?1048l';
 
+describe('Grid ASCII runs', () => {
+  test('matches writeChar for seeded printable ASCII and control sequences', () => {
+    let seed = 0xdecafbad;
+    const random = (): number => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed;
+    };
+    const attr = defaultAttr();
+
+    for (let i = 0; i < 240; i++) {
+      const cols = 1 + (random() % 12);
+      const rows = 1 + (random() % 6);
+      const expected = new Grid(cols, rows);
+      const actual = new Grid(cols, rows);
+      const autoWrap = (random() & 1) === 0;
+      expected.setAutoWrap(autoWrap);
+      actual.setAutoWrap(autoWrap);
+      const row = random() % rows;
+      const col = random() % cols;
+      expected.setCursor(row, col);
+      actual.setCursor(row, col);
+      if (random() & 1) {
+        const padding = 'x'.repeat(cols - col);
+        for (const ch of padding) expected.writeChar(ch, attr);
+        actual.writeAscii(padding, attr);
+      }
+
+      let input = '';
+      const length = 1 + (random() % 80);
+      for (let j = 0; j < length; j++) {
+        const kind = random() % 12;
+        input += kind === 0 ? '\r' : kind === 1 ? '\n' : String.fromCharCode(0x20 + (random() % 95));
+      }
+
+      for (const ch of input) {
+        if (ch === '\r') expected.carriageReturn();
+        else if (ch === '\n') expected.lineFeed();
+        else expected.writeChar(ch, attr);
+      }
+      let offset = 0;
+      for (const control of input.matchAll(/[\r\n]/g)) {
+        actual.writeAscii(input.slice(offset, control.index), attr);
+        if (control[0] === '\r') actual.carriageReturn();
+        else actual.lineFeed();
+        offset = control.index! + 1;
+      }
+      actual.writeAscii(input.slice(offset), attr);
+
+      expect(actual.screen).toEqual(expected.screen);
+      expect(actual.cursorRow).toBe(expected.cursorRow);
+      expect(actual.cursorCol).toBe(expected.cursorCol);
+      expect((actual as unknown as { pendingWrap: boolean }).pendingWrap).toBe(
+        (expected as unknown as { pendingWrap: boolean }).pendingWrap,
+      );
+    }
+  });
+});
+
 describe('Grid cell isolation', () => {
   test('writing replaces a shared blank without changing other blanks', () => {
     const grid = new Grid(3, 1);

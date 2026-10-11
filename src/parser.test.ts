@@ -41,6 +41,28 @@ function makeSink(overrides: Partial<ParserSink> = {}): ParserSink {
   return { ...base, ...overrides };
 }
 
+describe('AnsiParser printable ASCII runs', () => {
+  test('hands printable runs to sinks that support them around escape sequences', () => {
+    const events: string[] = [];
+    const parser = new AnsiParser(
+      makeSink({
+        printRun: (text) => events.push(`run:${text}`),
+        print: (ch) => events.push(`print:${ch}`),
+        setAttr: () => events.push('attr'),
+      }),
+    );
+    parser.writeString('hello\x1b[31mX');
+    expect(events).toEqual(['run:hello', 'attr', 'run:X']);
+  });
+
+  test('falls back to individual print calls without printRun', () => {
+    const printed: string[] = [];
+    const parser = new AnsiParser(makeSink({ print: (ch) => printed.push(ch) }));
+    parser.writeString('hello');
+    expect(printed).toEqual(['h', 'e', 'l', 'l', 'o']);
+  });
+});
+
 describe('AnsiParser Unicode input', () => {
   test('prints an emoji once', () => {
     const printed: string[] = [];

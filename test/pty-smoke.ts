@@ -6,13 +6,13 @@
 // Keep everything in one file: the Scenario/Step shape, runScenario(), and
 // the helpers for dumping grid state. Scenarios live in ./scenarios/*.ts.
 
-import { chmodSync, existsSync, statSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { chmodSync, existsSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
-import * as pty from 'node-pty';
-import { createHeadless, type Headless } from '../src/headless.js';
-import type { Cell } from '../src/grid.js';
+import * as pty from "node-pty";
+import { createHeadless, type Headless } from "../src/headless.js";
+import type { Cell } from "../src/grid.js";
 
 // Bun's tarball extractor drops the execute bit on the node-pty spawn-helper
 // binary. Without +x, every pty.spawn() errors with "posix_spawnp failed".
@@ -21,12 +21,12 @@ import type { Cell } from '../src/grid.js';
 (() => {
   try {
     const req = createRequire(import.meta.url);
-    const ptyPath = req.resolve('node-pty/package.json');
+    const ptyPath = req.resolve("node-pty/package.json");
     const root = dirname(ptyPath);
     const candidates = [
-      join(root, 'prebuilds', 'darwin-arm64', 'spawn-helper'),
-      join(root, 'prebuilds', 'darwin-x64', 'spawn-helper'),
-      join(root, 'build', 'Release', 'spawn-helper'),
+      join(root, "prebuilds", "darwin-arm64", "spawn-helper"),
+      join(root, "prebuilds", "darwin-x64", "spawn-helper"),
+      join(root, "build", "Release", "spawn-helper"),
     ];
     for (const p of candidates) {
       if (!existsSync(p)) continue;
@@ -40,11 +40,27 @@ import type { Cell } from '../src/grid.js';
   }
 })();
 
+export interface Expectation {
+  rows?: Record<number, string>;
+  cursor?: { row: number; col: number };
+  inAltScreen?: boolean;
+  knownFailure?: "F1";
+}
+
+interface StepBase {
+  expect?: Expectation;
+}
+
 export type Step =
-  | { type: 'input'; bytes: string | Uint8Array }
-  | { type: 'wait'; ms: number }
-  | { type: 'waitFor'; regex: RegExp; timeoutMs?: number; label?: string }
-  | { type: 'snapshot'; label: string };
+  | (StepBase & { type: "input"; bytes: string | Uint8Array })
+  | (StepBase & { type: "wait"; ms: number })
+  | (StepBase & {
+      type: "waitFor";
+      regex: RegExp;
+      timeoutMs?: number;
+      label?: string;
+    })
+  | (StepBase & { type: "snapshot"; label: string });
 
 export interface Scenario {
   name: string;
@@ -76,6 +92,8 @@ export interface ScenarioResult {
   snapshots: Snapshot[];
   steps: { type: string; label?: string; durationMs: number; note?: string }[];
   error?: string;
+  expectationFailures: ExpectationFailure[];
+  knownFailures: ExpectationFailure[];
   durationMs: number;
   bytesReceived: number;
   finalScreen?: string;
@@ -86,14 +104,60 @@ export interface ScenarioResult {
 /** Render grid.screen as one row per line, trailing whitespace trimmed per
  *  row for readability. Trailing blank rows are kept as empty lines so row
  *  indices line up with the cursor report. */
+export interface ExpectationFailure {
+  label: string;
+  knownFailure?: "F1";
+  differences: string[];
+}
+
 export function dumpScreen(rows: Cell[][]): string {
   const out: string[] = [];
   for (const row of rows) {
-    let s = '';
+    let s = "";
     for (const cell of row) s += cell.ch;
-    out.push(s.replace(/\s+$/u, ''));
+    out.push(s.replace(/\s+$/u, ""));
   }
-  return out.join('\n');
+  return out.join("\n");
+}
+
+function checkExpectation(
+  snapshot: Snapshot,
+  expectation: Expectation | undefined,
+): ExpectationFailure | undefined {
+  if (!expectation) return undefined;
+  const differences: string[] = [];
+  for (const [row, expected] of Object.entries(expectation.rows ?? {})) {
+    const actual = snapshot.screen.split("\n")[Number(row)] ?? "";
+    if (actual !== expected) {
+      differences.push(
+        `row ${row}: expected ${JSON.stringify(expected)}, actual ${JSON.stringify(actual)}`,
+      );
+    }
+  }
+  if (
+    expectation.cursor &&
+    (snapshot.cursor.row !== expectation.cursor.row ||
+      snapshot.cursor.col !== expectation.cursor.col)
+  ) {
+    differences.push(
+      `cursor: expected row=${expectation.cursor.row}, col=${expectation.cursor.col}; actual row=${snapshot.cursor.row}, col=${snapshot.cursor.col}`,
+    );
+  }
+  if (
+    expectation.inAltScreen !== undefined &&
+    snapshot.altScreen !== expectation.inAltScreen
+  ) {
+    differences.push(
+      `inAltScreen: expected ${expectation.inAltScreen}, actual ${snapshot.altScreen}`,
+    );
+  }
+  return differences.length === 0
+    ? undefined
+    : {
+        label: snapshot.label,
+        knownFailure: expectation.knownFailure,
+        differences,
+      };
 }
 
 function takeSnapshot(h: Headless, label: string): Snapshot {
@@ -119,6 +183,8 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     passed: false,
     snapshots: [],
     steps: [],
+    expectationFailures: [],
+    knownFailures: [],
     durationMs: 0,
     bytesReceived: 0,
   };
@@ -139,11 +205,14 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
   let term: pty.IPty | undefined;
   try {
     term = pty.spawn(scenario.shell, [], {
-      name: 'xterm-256color',
+      name: "xterm-256color",
       cols: scenario.cols,
       rows: scenario.rows,
       cwd: process.cwd(),
-      env: { ...(process.env as Record<string, string>), TERM: 'xterm-256color' },
+      env: {
+        ...(process.env as Record<string, string>),
+        TERM: "xterm-256color",
+      },
     });
   } catch (err) {
     result.error = `spawn failed: ${(err as Error).message}`;
@@ -166,14 +235,17 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
   const overallDeadline = started + (scenario.timeoutMs ?? 15_000);
 
   const writeInput = (input: string | Uint8Array) => {
-    if (typeof input === 'string') {
+    if (typeof input === "string") {
       term!.write(input);
     } else {
-      term!.write(Buffer.from(input).toString('binary'));
+      term!.write(Buffer.from(input).toString("binary"));
     }
   };
 
-  const waitForRegex = async (rx: RegExp, timeoutMs: number): Promise<boolean> => {
+  const waitForRegex = async (
+    rx: RegExp,
+    timeoutMs: number,
+  ): Promise<boolean> => {
     const deadline = Math.min(Date.now() + timeoutMs, overallDeadline);
     while (Date.now() < deadline) {
       const dump = dumpScreen(headless.grid.screen);
@@ -191,32 +263,37 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
 
     for (const step of scenario.script) {
       if (Date.now() > overallDeadline) {
-        throw new Error(`scenario exceeded timeoutMs (${scenario.timeoutMs ?? 15_000})`);
+        throw new Error(
+          `scenario exceeded timeoutMs (${scenario.timeoutMs ?? 15_000})`,
+        );
       }
       const stepStarted = Date.now();
       switch (step.type) {
-        case 'input':
+        case "input":
           writeInput(step.bytes);
           result.steps.push({
-            type: 'input',
+            type: "input",
             durationMs: Date.now() - stepStarted,
             note:
-              typeof step.bytes === 'string'
+              typeof step.bytes === "string"
                 ? JSON.stringify(step.bytes).slice(0, 80)
                 : `<${step.bytes.length} bytes>`,
           });
           break;
-        case 'wait':
+        case "wait":
           await sleep(step.ms);
-          result.steps.push({ type: 'wait', durationMs: Date.now() - stepStarted });
+          result.steps.push({
+            type: "wait",
+            durationMs: Date.now() - stepStarted,
+          });
           break;
-        case 'waitFor': {
+        case "waitFor": {
           const ok = await waitForRegex(step.regex, step.timeoutMs ?? 3000);
           result.steps.push({
-            type: 'waitFor',
+            type: "waitFor",
             label: step.label,
             durationMs: Date.now() - stepStarted,
-            note: `${step.regex.toString()} -> ${ok ? 'match' : 'TIMEOUT'}`,
+            note: `${step.regex.toString()} -> ${ok ? "match" : "TIMEOUT"}`,
           });
           if (!ok) {
             throw new Error(
@@ -225,13 +302,19 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
           }
           break;
         }
-        case 'snapshot': {
-          // Small drain: wait 50ms for any in-flight output to settle so the
-          // snapshot reflects steady state rather than a half-painted frame.
+        case "snapshot": {
           await sleep(50);
-          result.snapshots.push(takeSnapshot(headless, step.label));
+          const snapshot = takeSnapshot(headless, step.label);
+          result.snapshots.push(snapshot);
+          const failure = checkExpectation(snapshot, step.expect);
+          if (failure) {
+            (failure.knownFailure
+              ? result.knownFailures
+              : result.expectationFailures
+            ).push(failure);
+          }
           result.steps.push({
-            type: 'snapshot',
+            type: "snapshot",
             label: step.label,
             durationMs: Date.now() - stepStarted,
           });
@@ -240,15 +323,18 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
       }
     }
 
-    result.passed = true;
+    result.passed = result.expectationFailures.length === 0;
+    if (!result.passed) {
+      result.error = `${result.expectationFailures.length} expectation failure(s)`;
+    }
   } catch (err) {
     result.error = (err as Error).message;
     // Capture a final snapshot so failures are debuggable.
-    result.snapshots.push(takeSnapshot(headless, '__on_error__'));
+    result.snapshots.push(takeSnapshot(headless, "__on_error__"));
   } finally {
     // Ensure shell exits even if the scenario didn't send "exit".
     try {
-      term.write('\x04'); // EOT; terminates many line editors / shells
+      term.write("\x04");
     } catch {
       /* already gone */
     }
@@ -265,7 +351,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
       }
     }
 
-    const final = takeSnapshot(headless, '__final__');
+    const final = takeSnapshot(headless, "__final__");
     result.finalScreen = final.screen;
     result.finalCursor = final.cursor;
     result.finalAltScreen = final.altScreen;

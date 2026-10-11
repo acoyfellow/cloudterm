@@ -1,100 +1,124 @@
 // Orchestrator. Runs every scenario, prints a terse live summary, writes
 // test/REPORT.md with full snapshot dumps for human review.
 
-import { writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { runScenario, type ScenarioResult, type Snapshot } from './pty-smoke.js';
-import { scenario as basic } from './scenarios/basic.js';
-import { scenario as vim } from './scenarios/vim.js';
-import { scenario as less } from './scenarios/less.js';
-import { scenario as htop } from './scenarios/htop.js';
-import { scenario as tmux } from './scenarios/tmux.js';
-import { scenario as heavyOutput } from './scenarios/heavy-output.js';
+import {
+  runScenario,
+  type ScenarioResult,
+  type Snapshot,
+} from "./pty-smoke.js";
+import { scenario as basic } from "./scenarios/basic.js";
+import { scenario as vim } from "./scenarios/vim.js";
+import { scenario as less } from "./scenarios/less.js";
+import { scenario as htop } from "./scenarios/htop.js";
+import { scenario as tmux } from "./scenarios/tmux.js";
+import { scenario as heavyOutput } from "./scenarios/heavy-output.js";
 
 const scenarios = [basic, vim, less, heavyOutput, htop, tmux];
 
 function statusTag(r: ScenarioResult): string {
-  if (r.skipped) return 'SKIP';
-  if (r.passed) return 'PASS';
-  return 'FAIL';
+  if (r.skipped) return "SKIP";
+  if (r.passed) return "PASS";
+  return "FAIL";
 }
 
 function fmtMs(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(2)}s`;
 }
 
+function expectationMarkdown(r: ScenarioResult): string[] {
+  const lines: string[] = [];
+  for (const failure of [...r.expectationFailures, ...r.knownFailures]) {
+    const kind = failure.knownFailure
+      ? `known failure ${failure.knownFailure}`
+      : "expectation failure";
+    lines.push(`${kind} at ${failure.label}:`);
+    for (const difference of failure.differences) lines.push(`  ${difference}`);
+  }
+  return lines;
+}
+
 function snapshotMarkdown(s: Snapshot): string {
   const lines: string[] = [];
   lines.push(`### snapshot: \`${s.label}\``);
-  lines.push('');
+  lines.push("");
   lines.push(
     `- cursor: row=${s.cursor.row}, col=${s.cursor.col}` +
       ` (grid is ${s.rows}x${s.cols})`,
   );
   lines.push(`- altScreen: \`${s.altScreen}\``);
   lines.push(`- scrollback rows: ${s.scrollbackLen}`);
-  lines.push('');
-  lines.push('```');
+  lines.push("");
+  lines.push("```");
   // Mark cursor position inline using a caret on a dedicated line so the
   // rendered screen stays faithful. Keep this as a straight dump.
   lines.push(s.screen);
-  lines.push('```');
-  lines.push('');
-  return lines.join('\n');
+  lines.push("```");
+  lines.push("");
+  return lines.join("\n");
 }
 
 function resultMarkdown(r: ScenarioResult): string {
   const out: string[] = [];
   out.push(`## ${r.name} — ${statusTag(r)} (${fmtMs(r.durationMs)})`);
-  out.push('');
+  out.push("");
   if (r.skipped) {
     out.push(`_skipped: ${r.skipReason}_`);
-    out.push('');
-    return out.join('\n');
+    out.push("");
+    return out.join("\n");
   }
   out.push(`- bytes received from PTY: ${r.bytesReceived}`);
   out.push(`- snapshots: ${r.snapshots.length}`);
   out.push(`- steps: ${r.steps.length}`);
   if (r.error) {
-    out.push('');
+    out.push("");
     out.push(`**error:** \`${r.error}\``);
   }
-  out.push('');
-  out.push('<details><summary>step trace</summary>');
-  out.push('');
-  out.push('| # | type | label | ms | note |');
-  out.push('|---|------|-------|----|------|');
+  if (r.expectationFailures.length > 0 || r.knownFailures.length > 0) {
+    out.push("");
+    out.push("```text");
+    out.push(...expectationMarkdown(r));
+    out.push("```");
+  }
+  out.push("");
+  out.push("<details><summary>step trace</summary>");
+  out.push("");
+  out.push("| # | type | label | ms | note |");
+  out.push("|---|------|-------|----|------|");
   r.steps.forEach((s, i) => {
-    const note = (s.note ?? '').replace(/\|/g, '\\|');
-    out.push(`| ${i} | ${s.type} | ${s.label ?? ''} | ${s.durationMs} | ${note} |`);
+    const note = (s.note ?? "").replace(/\|/g, "\\|");
+    out.push(
+      `| ${i} | ${s.type} | ${s.label ?? ""} | ${s.durationMs} | ${note} |`,
+    );
   });
-  out.push('');
-  out.push('</details>');
-  out.push('');
+  out.push("");
+  out.push("</details>");
+  out.push("");
   for (const snap of r.snapshots) out.push(snapshotMarkdown(snap));
   if (r.finalScreen !== undefined) {
-    out.push('### final state (after scenario cleanup)');
-    out.push('');
+    out.push("### final state (after scenario cleanup)");
+    out.push("");
     out.push(
-      `- cursor: row=${r.finalCursor?.row ?? '?'}, col=${r.finalCursor?.col ?? '?'}` +
+      `- cursor: row=${r.finalCursor?.row ?? "?"}, col=${r.finalCursor?.col ?? "?"}` +
         ` · altScreen: \`${r.finalAltScreen}\``,
     );
-    out.push('');
-    out.push('```');
+    out.push("");
+    out.push("```");
     out.push(r.finalScreen);
-    out.push('```');
-    out.push('');
+    out.push("```");
+    out.push("");
   }
-  return out.join('\n');
+  return out.join("\n");
 }
 
 async function main() {
   const results: ScenarioResult[] = [];
-  console.log('cloudterm smoke harness');
+  console.log("cloudterm smoke harness");
   console.log(`node ${process.version} · ${process.platform}/${process.arch}`);
-  console.log('');
+  console.log("");
 
   for (const s of scenarios) {
     const line = `> ${s.name.padEnd(14)}`;
@@ -105,9 +129,10 @@ async function main() {
     const extra = r.skipped
       ? ` (${r.skipReason})`
       : r.error
-      ? ` (${r.error})`
-      : ` · ${r.snapshots.length} snapshots · ${r.bytesReceived}B`;
+        ? ` (${r.error})`
+        : ` · ${r.snapshots.length} snapshots · ${r.bytesReceived}B`;
     process.stdout.write(`  ${tag} ${fmtMs(r.durationMs)}${extra}\n`);
+    for (const line of expectationMarkdown(r)) console.log(`  ${line}`);
   }
 
   // Summary counters
@@ -118,57 +143,57 @@ async function main() {
     else counts.fail += 1;
   }
 
-  console.log('');
+  console.log("");
   console.log(
     `summary: ${counts.pass} pass · ${counts.fail} fail · ${counts.skip} skip`,
   );
 
   // Build REPORT.md.
   const md: string[] = [];
-  md.push('# cloudterm smoke report');
-  md.push('');
+  md.push("# cloudterm smoke report");
+  md.push("");
   md.push(`Generated ${new Date().toISOString()} on node ${process.version}.`);
-  md.push('');
+  md.push("");
   md.push(
     `**${counts.pass} pass · ${counts.fail} fail · ${counts.skip} skip**`,
   );
-  md.push('');
-  md.push('| scenario | status | duration | snapshots | bytes |');
-  md.push('|----------|--------|----------|-----------|-------|');
+  md.push("");
+  md.push("| scenario | status | duration | snapshots | bytes |");
+  md.push("|----------|--------|----------|-----------|-------|");
   for (const r of results) {
     md.push(
       `| ${r.name} | ${statusTag(r)} | ${fmtMs(r.durationMs)} | ` +
         `${r.snapshots.length} | ${r.bytesReceived} |`,
     );
   }
-  md.push('');
-  md.push('## how to read this');
-  md.push('');
+  md.push("");
+  md.push("## how to read this");
+  md.push("");
   md.push(
-    '- Each snapshot is the raw grid dump at a labeled point in the scenario.',
+    "- Each snapshot is the raw grid dump at a labeled point in the scenario.",
   );
   md.push(
-    '- `altScreen: true` means the grid reports the alternate buffer is active.',
+    "- `altScreen: true` means the grid reports the alternate buffer is active.",
   );
   md.push(
-    '  If the field reads `false` during `vim`/`less`/`htop`, alt-screen routing',
+    "  If the field reads `false` during `vim`/`less`/`htop`, alt-screen routing",
   );
-  md.push('  is not wired up yet.');
-  md.push('- Cursor row/col are 0-indexed relative to the active screen.');
+  md.push("  is not wired up yet.");
+  md.push("- Cursor row/col are 0-indexed relative to the active screen.");
   md.push(
-    '- `main-before-*` vs `main-after-*` snapshots diff the main buffer across',
+    "- `main-before-*` vs `main-after-*` snapshots diff the main buffer across",
   );
   md.push(
-    '  an alt-screen excursion. If they differ unexpectedly, the main buffer was',
+    "  an alt-screen excursion. If they differ unexpectedly, the main buffer was",
   );
-  md.push('  not preserved.');
-  md.push('');
+  md.push("  not preserved.");
+  md.push("");
 
   for (const r of results) md.push(resultMarkdown(r));
 
   const here = dirname(fileURLToPath(import.meta.url));
-  const reportPath = join(here, 'REPORT.md');
-  await writeFile(reportPath, md.join('\n'), 'utf8');
+  const reportPath = join(here, "REPORT.md");
+  await writeFile(reportPath, md.join("\n"), "utf8");
   console.log(`report written: ${reportPath}`);
 
   // Non-zero exit if any scenario failed (not skipped). Jordan can override
@@ -178,6 +203,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('runner crashed:', err);
+  console.error("runner crashed:", err);
   process.exit(2);
 });

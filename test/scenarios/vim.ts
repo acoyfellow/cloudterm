@@ -16,7 +16,11 @@ export const scenario: Scenario = {
   timeoutMs: 15_000,
   script: [
     { type: "input", bytes: `export PS1='${PROMPT}' PS2='... '; clear\r` },
-    { type: "waitFor", regex: new RegExp(PROMPT), label: "initial-prompt" },
+    {
+      type: "waitFor",
+      label: "initial-prompt",
+      until: { rows: { 0: ">>>" }, cursor: { row: 0, col: 4 } },
+    },
     { type: "input", bytes: `echo ${MARKER}\r` },
     { type: "waitFor", regex: new RegExp(MARKER), label: "marker-visible" },
     { type: "snapshot", label: "main-before-vim" },
@@ -26,8 +30,16 @@ export const scenario: Scenario = {
     { type: "input", bytes: "vim -n -u NONE\r" },
     // Vim paints "~" on every empty line.
     { type: "waitFor", regex: /~/, timeoutMs: 5000, label: "vim-painted" },
-    { type: "wait", ms: 200 },
-    { type: "snapshot", label: "alt-in-vim" },
+    {
+      type: "waitFor",
+      label: "vim-alt-screen",
+      until: { inAltScreen: true },
+    },
+    {
+      type: "snapshot",
+      label: "alt-in-vim",
+      expect: { inAltScreen: true },
+    },
 
     // Type some text in vim so we can see it in the alt screen snapshot.
     { type: "input", bytes: "iHELLO_FROM_VIM\x1b" },

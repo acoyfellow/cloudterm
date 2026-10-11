@@ -61,6 +61,12 @@ export type Step =
       timeoutMs?: number;
       label?: string;
     })
+  | (StepBase & {
+      type: "waitFor";
+      until: Expectation;
+      timeoutMs?: number;
+      label?: string;
+    })
   | (StepBase & { type: "snapshot"; label: string });
 
 export interface Scenario {
@@ -73,6 +79,7 @@ export interface Scenario {
   skipIf?: () => { skip: true; reason: string } | { skip: false };
   /** Per-scenario overall timeout. Default 15_000ms. */
   timeoutMs?: number;
+  cleanup?: () => void | Promise<void>;
 }
 
 export interface Snapshot {
@@ -121,7 +128,7 @@ export function dumpScreen(rows: Cell[][]): string {
   return out.join("\n");
 }
 
-function checkExpectation(
+export function checkExpectation(
   snapshot: Snapshot,
   expectation: Expectation | undefined,
 ): ExpectationFailure | undefined {
@@ -183,6 +190,28 @@ function takeSnapshot(h: Headless, label: string): Snapshot {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+export interface PollOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+}
+
+export async function pollForExpectation(
+  read: () => Snapshot,
+  expectation: Expectation,
+  options: PollOptions = {},
+): Promise<{ matched: true } | { matched: false; failure?: ExpectationFailure }> {
+  const deadline = Date.now() + (options.timeoutMs ?? 5000);
+  const intervalMs = options.intervalMs ?? 25;
+  let failure: ExpectationFailure | undefined;
+  do {
+    failure = checkExpectation(read(), expectation);
+    if (!failure) return { matched: true };
+    if (Date.now() >= deadline) break;
+    await sleep(intervalMs);
+  } while (true);
+  return { matched: false, failure };
 }
 
 export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
@@ -256,13 +285,17 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     timeoutMs: number,
   ): Promise<boolean> => {
     const deadline = Math.min(Date.now() + timeoutMs, overallDeadline);
-    while (Date.now() < deadline) {
+    do {
       const dump = dumpScreen(headless.grid.screen);
+      rx.lastIndex = 0;
       if (rx.test(dump)) return true;
-      await sleep(20);
-    }
+      if (Date.now() >= deadline) break;
+      await sleep(25);
+    } while (true);
     return false;
   };
+
+  const readSnapshot = (label: string) => takeSnapshot(headless, label);
 
   try {
     // Give the shell a moment to print its initial prompt before the script
@@ -297,23 +330,35 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
           });
           break;
         case "waitFor": {
-          const ok = await waitForRegex(step.regex, step.timeoutMs ?? 3000);
-          result.steps.push({
-            type: "waitFor",
-            label: step.label,
-            durationMs: Date.now() - stepStarted,
-            note: `${step.regex.toString()} -> ${ok ? "match" : "TIMEOUT"}`,
-          });
-          if (!ok) {
-            throw new Error(
-              `waitFor ${step.regex.toString()} timed out after ${step.timeoutMs ?? 3000}ms`,
+          const timeoutMs = step.timeoutMs ?? 5000;
+          if ("regex" in step) {
+            const ok = await waitForRegex(step.regex, timeoutMs);
+            result.steps.push({
+              type: "waitFor",
+              label: step.label,
+              durationMs: Date.now() - stepStarted,
+              note: `${step.regex.toString()} -> ${ok ? "match" : `waitFor timed out after ${timeoutMs}ms`}`,
+            });
+          } else {
+            const polled = await pollForExpectation(
+              () => readSnapshot(step.label ?? "waitFor"),
+              step.until,
+              { timeoutMs: Math.min(timeoutMs, overallDeadline - Date.now()) },
             );
+            result.steps.push({
+              type: "waitFor",
+              label: step.label,
+              durationMs: Date.now() - stepStarted,
+              note: polled.matched
+                ? "expectation matched"
+                : `waitFor timed out after ${timeoutMs}ms`,
+            });
           }
           break;
         }
         case "snapshot": {
           await sleep(50);
-          const snapshot = takeSnapshot(headless, step.label);
+          const snapshot = readSnapshot(step.label);
           result.snapshots.push(snapshot);
           const failure = checkExpectation(snapshot, step.expect);
           if (failure) {
@@ -341,6 +386,11 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     // Capture a final snapshot so failures are debuggable.
     result.snapshots.push(takeSnapshot(headless, "__on_error__"));
   } finally {
+    try {
+      await scenario.cleanup?.();
+    } catch (err) {
+      if (!result.error) result.error = `cleanup failed: ${(err as Error).message}`;
+    }
     // Ensure shell exits even if the scenario didn't send "exit".
     try {
       term.write("\x04");

@@ -13,7 +13,11 @@ export const scenario: Scenario = {
   timeoutMs: 15_000,
   script: [
     { type: "input", bytes: `export PS1='${PROMPT}' PS2='... '; clear\r` },
-    { type: "waitFor", regex: new RegExp(PROMPT), label: "initial-prompt" },
+    {
+      type: "waitFor",
+      label: "initial-prompt",
+      until: { rows: { 0: ">>>" }, cursor: { row: 0, col: 4 } },
+    },
     { type: "snapshot", label: "main-before-less" },
 
     { type: "input", bytes: "less /etc/passwd\r" },
@@ -29,8 +33,16 @@ export const scenario: Scenario = {
 
     // Page forward. Space is the less pager bind.
     { type: "input", bytes: " " },
-    { type: "wait", ms: 250 },
-    { type: "snapshot", label: "in-less-scrolled" },
+    {
+      type: "waitFor",
+      label: "less-after-scroll",
+      until: { inAltScreen: true },
+    },
+    {
+      type: "snapshot",
+      label: "in-less-scrolled",
+      expect: { inAltScreen: true },
+    },
 
     { type: "input", bytes: "q" },
     {

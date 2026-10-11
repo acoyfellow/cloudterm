@@ -38,7 +38,11 @@ export const scenario: Scenario = {
   timeoutMs: 15_000,
   script: [
     { type: "input", bytes: `export PS1='${PROMPT}' PS2='... '; clear\r` },
-    { type: "waitFor", regex: new RegExp(PROMPT), label: "initial-prompt" },
+    {
+      type: "waitFor",
+      label: "initial-prompt",
+      until: { rows: { 0: ">>>" }, cursor: { row: 0, col: 4 } },
+    },
     { type: "snapshot", label: "before-first-run" },
 
     // Run 1.
@@ -72,7 +76,15 @@ export const scenario: Scenario = {
     // line. If this renders anywhere else, the cursor/prompt tracking we
     // thought was broken actually is.
     { type: "input", bytes: "ls" },
-    { type: "wait", ms: 150 },
+    {
+      type: "waitFor",
+      label: "typed-ls",
+      until: {
+        rows: { 23: ">>> ls" },
+        cursor: { row: 23, col: 6 },
+        inAltScreen: false,
+      },
+    },
     {
       type: "snapshot",
       label: "typed-ls-no-enter",
@@ -86,7 +98,15 @@ export const scenario: Scenario = {
     // Clean up: backspace the typed chars so the shell does not try to run
     // `ls` on exit, then exit.
     { type: "input", bytes: "\x7f\x7f" },
-    { type: "wait", ms: 100 },
+    {
+      type: "waitFor",
+      label: "backspace-complete",
+      until: {
+        rows: { 23: ">>>" },
+        cursor: { row: 23, col: 4 },
+        inAltScreen: false,
+      },
+    },
     {
       type: "snapshot",
       label: "after-backspace",

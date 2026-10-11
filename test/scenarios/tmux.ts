@@ -23,18 +23,34 @@ export const scenario: Scenario = {
   timeoutMs: 15_000,
   skipIf: () =>
     hasTmux() ? { skip: false } : { skip: true, reason: "tmux not installed" },
+  cleanup: () => {
+    try {
+      execSync("tmux -L cloudterm-smoke kill-server", { stdio: "ignore" });
+    } catch {}
+  },
   script: [
     { type: "input", bytes: `export PS1='${PROMPT}' PS2='... '; clear\r` },
-    { type: "waitFor", regex: new RegExp(PROMPT), label: "initial-prompt" },
+    {
+      type: "waitFor",
+      label: "initial-prompt",
+      until: { rows: { 0: ">>>" }, cursor: { row: 0, col: 4 } },
+    },
     { type: "snapshot", label: "main-before-tmux" },
 
     // -L cloudterm-smoke gives us an isolated server so we never attach to
     // a pre-existing tmux session.
     { type: "input", bytes: "tmux -L cloudterm-smoke new-session -s t -d\r" },
-    { type: "wait", ms: 300 },
+    {
+      type: "waitFor",
+      regex: new RegExp(PROMPT),
+      label: "tmux-server-started",
+    },
     { type: "input", bytes: "tmux -L cloudterm-smoke attach -t t\r" },
-    // Inside tmux the status bar at the bottom shows the session name.
-    { type: "wait", ms: 1000 },
+    {
+      type: "waitFor",
+      label: "tmux-attached",
+      until: { rowPrefixes: { 29: " t 0:zsh*" }, inAltScreen: true },
+    },
     {
       type: "snapshot",
       label: "in-tmux",
@@ -43,7 +59,11 @@ export const scenario: Scenario = {
 
     // Run a command inside tmux's inner shell.
     { type: "input", bytes: "echo tmux_inner\r" },
-    { type: "wait", ms: 300 },
+    {
+      type: "waitFor",
+      label: "tmux-command-complete",
+      until: { inAltScreen: true },
+    },
     {
       type: "snapshot",
       label: "in-tmux-after-command",
@@ -52,7 +72,11 @@ export const scenario: Scenario = {
 
     // Detach: prefix C-b then d.
     { type: "input", bytes: "\x02d" },
-    { type: "wait", ms: 300 },
+    {
+      type: "waitFor",
+      label: "tmux-detached",
+      until: { inAltScreen: false },
+    },
     {
       type: "snapshot",
       label: "main-after-tmux",
@@ -61,7 +85,6 @@ export const scenario: Scenario = {
 
     // Clean up the tmux server so we don't leave background processes.
     { type: "input", bytes: "tmux -L cloudterm-smoke kill-server\r" },
-    { type: "wait", ms: 200 },
     { type: "input", bytes: "exit\r" },
   ],
 };

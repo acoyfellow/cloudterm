@@ -50,12 +50,14 @@ type Step =
   | { type: "input",    bytes: string | Uint8Array }
   | { type: "wait",     ms: number }
   | { type: "waitFor",  regex: RegExp, timeoutMs?: number, label?: string }
+  | { type: "waitFor",  until: Expectation, timeoutMs?: number, label?: string }
   | { type: "snapshot", label: string };
 ```
 
-`waitFor` polls the rendered screen every 20ms until the regex matches or
-times out. `snapshot` waits 50ms to let in-flight output settle, then
-captures `grid.screen` as text plus cursor and `inAltScreen` flag.
+`waitFor` polls the rendered grid every 25ms until its regex or `until`
+expectation matches, or until its 5000ms default timeout. `snapshot` waits
+50ms to let in-flight output settle, then captures `grid.screen` as text plus
+cursor and `inAltScreen` flag.
 
 ## How to interpret REPORT.md
 

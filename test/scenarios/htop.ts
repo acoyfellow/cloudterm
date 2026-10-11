@@ -25,7 +25,11 @@ export const scenario: Scenario = {
     hasHtop() ? { skip: false } : { skip: true, reason: "htop not installed" },
   script: [
     { type: "input", bytes: `export PS1='${PROMPT}' PS2='... '; clear\r` },
-    { type: "waitFor", regex: new RegExp(PROMPT), label: "initial-prompt" },
+    {
+      type: "waitFor",
+      label: "initial-prompt",
+      until: { rows: { 0: ">>>" }, cursor: { row: 0, col: 4 } },
+    },
     { type: "snapshot", label: "main-before-htop" },
 
     { type: "input", bytes: "htop\r" },
@@ -36,12 +40,14 @@ export const scenario: Scenario = {
       timeoutMs: 4000,
       label: "htop-painted",
     },
-    { type: "wait", ms: 500 },
+    {
+      type: "waitFor",
+      label: "htop-alt-screen",
+      until: { inAltScreen: true },
+    },
     { type: "snapshot", label: "in-htop", expect: { inAltScreen: true } },
 
-    // Let it repaint a couple more cycles.
-    { type: "wait", ms: 1500 },
-    { type: "snapshot", label: "in-htop-later" },
+    { type: "snapshot", label: "in-htop-later", expect: { inAltScreen: true } },
 
     // q to quit htop.
     { type: "input", bytes: "q" },

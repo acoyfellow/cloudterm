@@ -14,7 +14,11 @@ export const scenario: Scenario = {
   script: [
     // Force a boring prompt so regex matching is not fighting oh-my-zsh.
     { type: "input", bytes: `export PS1='${PROMPT}' PS2='... '; clear\r` },
-    { type: "waitFor", regex: new RegExp(PROMPT), label: "initial-prompt" },
+    {
+      type: "waitFor",
+      label: "initial-prompt",
+      until: { rows: { 0: ">>>" }, cursor: { row: 0, col: 4 } },
+    },
     { type: "snapshot", label: "after-clear" },
 
     { type: "input", bytes: "echo hello\r" },
@@ -38,7 +42,15 @@ export const scenario: Scenario = {
     },
 
     { type: "input", bytes: "clear\r" },
-    { type: "wait", ms: 200 },
+    {
+      type: "waitFor",
+      label: "second-clear",
+      until: {
+        rows: { 0: ">>>" },
+        cursor: { row: 0, col: 4 },
+        inAltScreen: false,
+      },
+    },
     {
       type: "snapshot",
       label: "after-second-clear",

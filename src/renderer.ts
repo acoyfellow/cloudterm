@@ -52,6 +52,10 @@ const PALETTE_16 = [
   '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
 ];
 
+function rgbHex(r: number, g: number, b: number): string {
+  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
 function xterm256Color(n: number): string {
   if (n < 16) return PALETTE_16[n]!;
   if (n >= 232) {
@@ -66,19 +70,20 @@ function xterm256Color(n: number): string {
   return rgbHex(map[r]!, map[g]!, map[b]!);
 }
 
-function rgbHex(r: number, g: number, b: number): string {
-  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
-}
+const PALETTE_256 = Array.from({ length: 256 }, (_, index) => xterm256Color(index));
+const truecolorCache = new Map<number, string>();
 
 function colorOf(n: number, fallback: string): string {
   if (n < 0) return fallback;
   if (n & 0x01000000) {
-    const r = (n >> 16) & 0xff;
-    const g = (n >> 8) & 0xff;
-    const b = n & 0xff;
-    return rgbHex(r, g, b);
+    const cached = truecolorCache.get(n);
+    if (cached) return cached;
+    const color = rgbHex((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff);
+    if (truecolorCache.size >= 4096) truecolorCache.clear();
+    truecolorCache.set(n, color);
+    return color;
   }
-  if (n < 256) return xterm256Color(n);
+  if (n < 256) return PALETTE_256[n]!;
   return fallback;
 }
 
@@ -116,7 +121,9 @@ export class DomRenderer {
 
   // Virtualization: track rendered line indexes -> their divs.
   private rendered = new Map<number, HTMLDivElement>();
+  private linePool: HTMLDivElement[] = [];
   private overscan = 4;
+  private hadPredictions = false;
 
   // Optional speculative-echo overlay. When set, paint() rebuilds the overlay
   // layer from this buffer on every frame. Items are small (0-5 typical).
@@ -241,6 +248,7 @@ export class DomRenderer {
       if (idx < first || idx > last) {
         el.remove();
         this.rendered.delete(idx);
+        if (this.linePool.length < this.grid.rows * 2) this.linePool.push(el);
       }
     }
 
@@ -258,7 +266,7 @@ export class DomRenderer {
         }
         continue;
       }
-      const div = document.createElement('div');
+      const div = this.linePool.pop() ?? document.createElement('div');
       div.className = 'cloudterm-line';
       div.style.top = `${(i - this.grid.trimmed) * this.lineHeight}px`;
       div.style.height = `${this.lineHeight}px`;
@@ -309,12 +317,14 @@ export class DomRenderer {
   }
 
   private paintPredictions(): void {
-    // Full rebuild every paint. Bounded by in-flight keystrokes (0-5 typical),
-    // so the cost stays negligible compared to line rebuilds.
+    const predictions = this.predictions;
+    const hasPredictions = predictions !== null && predictions.size > 0;
+    if (!hasPredictions && !this.hadPredictions) return;
     this.predictLayer.textContent = '';
-    if (!this.predictions || this.predictions.size === 0) return;
+    this.hadPredictions = hasPredictions;
+    if (!predictions || !hasPredictions) return;
     const scrollbackLen = this.grid.scrollback.length;
-    for (const p of this.predictions.iter()) {
+    for (const p of predictions.iter()) {
       if (p.kind !== 'print') continue;
       // Skip predictions that would land outside the current grid shape
       // (resize could have shrunk us below the prediction column).
@@ -337,11 +347,11 @@ export class DomRenderer {
   }
 
   private renderLineInto(div: HTMLDivElement, line: Cell[]): void {
-    div.textContent = '';
+    const runs: Array<{ text: string; attr: CellAttr; width: number }> = [];
     let runAttr: CellAttr | null = null;
     let runBuf = '';
     const flush = (): void => {
-      if (runAttr && runBuf) this.emitRun(div, runBuf, runAttr);
+      if (runAttr && runBuf) runs.push({ text: runBuf, attr: runAttr, width: 1 });
       runAttr = null;
       runBuf = '';
     };
@@ -350,7 +360,7 @@ export class DomRenderer {
       if (cell.ch === '') continue;
       if (wcwidth(cell.ch) === 2 && this.isWideCell(line, i)) {
         flush();
-        this.emitRun(div, cell.ch, cell.attr, 2);
+        runs.push({ text: cell.ch, attr: cell.attr, width: 2 });
         continue;
       }
       if (runAttr && attrEq(cell.attr, runAttr)) runBuf += cell.ch;
@@ -361,38 +371,44 @@ export class DomRenderer {
       }
     }
     flush();
+    for (let index = 0; index < runs.length; index++) {
+      const run = runs[index]!;
+      const span = div.children[index] as HTMLSpanElement | undefined ?? document.createElement('span');
+      this.emitRun(span, run.text, run.attr, run.width);
+      if (!span.parentElement) div.appendChild(span);
+    }
+    while (div.children.length > runs.length) div.lastElementChild!.remove();
   }
 
   private isWideCell(line: Cell[], index: number): boolean {
     return index + 1 < line.length && line[index + 1]!.ch === '';
   }
 
-  private emitRun(parent: HTMLDivElement, text: string, attr: CellAttr, width = 1): void {
-    if (!text.length) return;
-    const span = document.createElement('span');
+  private emitRun(span: HTMLSpanElement, text: string, attr: CellAttr, width = 1): void {
     let fg = attr.fg;
     let bg = attr.bg;
     if (attr.reverse) {
       const t = fg;
       fg = bg;
       bg = t;
-      // Map defaults: swap foreground <-> background default.
-      if (fg < 0) fg = 15; // placeholder: colorOf handles negative using fallback
+      if (fg < 0) fg = 15;
       if (bg < 0) bg = 0;
     }
     const fgColor = colorOf(fg, 'var(--ct-fg)');
     const bgColor = colorOf(bg, attr.reverse ? 'var(--ct-fg)' : 'transparent');
-    if (fgColor !== 'var(--ct-fg)') span.style.color = fgColor;
-    if (bgColor !== 'transparent') span.style.background = bgColor;
-    if (attr.bold) span.style.fontWeight = 'bold';
-    if (attr.italic) span.style.fontStyle = 'italic';
-    if (attr.underline) span.style.textDecoration = 'underline';
-    if (width === 2) {
-      span.style.display = 'inline-block';
-      span.style.width = `${this.charWidth * 2}px`;
+    const styleValues: Array<[string, string]> = [
+      ['color', fgColor === 'var(--ct-fg)' ? '' : fgColor],
+      ['background', bgColor === 'transparent' ? '' : bgColor],
+      ['font-weight', attr.bold ? 'bold' : ''],
+      ['font-style', attr.italic ? 'italic' : ''],
+      ['text-decoration', attr.underline ? 'underline' : ''],
+      ['display', width === 2 ? 'inline-block' : ''],
+      ['width', width === 2 ? `${this.charWidth * 2}px` : ''],
+    ];
+    for (const [property, value] of styleValues) {
+      if (span.style.getPropertyValue(property) !== value) span.style.setProperty(property, value);
     }
-    span.textContent = text;
-    parent.appendChild(span);
+    if (span.textContent !== text) span.textContent = text;
   }
 
   scrollToBottom(): void {

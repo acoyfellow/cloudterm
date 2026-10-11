@@ -50,6 +50,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "happy-dom": "^20.14.6",
     "node-pty": "^1.1.0",
     "tsdown": "^0.17.0",
     "tsx": "^4.21.0",

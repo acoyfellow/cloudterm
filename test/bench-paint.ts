@@ -1,46 +1,63 @@
-// Headless paint benchmark. No DOM.
-//
-// Measures parser + grid cost for a flood of colored output.
-// 10,000 SGR-wrapped tokens simulates sustained shell output (e.g. long ls,
-// build log with ANSI colors). Since there's no renderer.paint() here, this
-// number is purely the cost of feeding bytes into AnsiParser and mutating
-// the Grid. The DOM paint win is validated in the browser.
-//
-// Run: bun run bench
-
 import { createHeadless } from '../src/headless.js';
 
-function run(): void {
-  const h = createHeadless(120, 40, { maxScrollback: 10_000 });
-  const token = '\x1b[32mfoo\x1b[0m ';
-  const N = 10_000;
+type Workload = {
+  name: string;
+  input: string;
+};
 
-  // Pre-build the input as one big string so we isolate parser+grid cost.
-  const input = token.repeat(N);
+const cols = 120;
+const rows = 40;
+const maxScrollback = 10_000;
+const sgrToken = '\x1b[32mfoo\x1b[0m ';
+const plainLine = `${'x'.repeat(100)}\r\n`;
+const repaintRow = `\x1b[32m${'x'.repeat(cols)}\x1b[0m\r\n`;
 
-  const t0 = performance.now();
-  h.feedString(input);
-  // Simulated "paint" boundary: read dirtyLines (forces renderer-facing
-  // path), then clear. If the new API is available, exercise it; otherwise
-  // just read grid.dirty.
-  const anyGrid = h.grid as unknown as {
-    consumeDirty?: () => { dirtyAll: boolean; dirtyLines: Set<number> };
-  };
-  if (typeof anyGrid.consumeDirty === 'function') {
-    const d = anyGrid.consumeDirty();
-    // Touch the result so DCE can't drop it.
-    if (d.dirtyLines.size < 0) throw new Error('impossible');
-  } else {
-    h.grid.dirty = false;
+const workloads: Workload[] = [
+  { name: 'sgr-tokens', input: sgrToken.repeat(10_000) },
+  { name: 'scroll-flood', input: plainLine.repeat(50_000) },
+  { name: 'full-redraw', input: `${'\x1b[H'}${repaintRow.repeat(rows)}`.repeat(2_000) },
+];
+
+function run(input: string): void {
+  const terminal = createHeadless(cols, rows, { maxScrollback });
+  terminal.feedString(input);
+}
+
+function percentile(samples: number[], fraction: number): number {
+  const index = Math.ceil(samples.length * fraction) - 1;
+  return samples[index]!;
+}
+
+function benchmark(workload: Workload): void {
+  for (let i = 0; i < 3; i++) run(workload.input);
+  const samples: number[] = [];
+  for (let i = 0; i < 15; i++) {
+    const started = performance.now();
+    run(workload.input);
+    samples.push(performance.now() - started);
   }
-  const t1 = performance.now();
-
-  const ms = t1 - t0;
-  const bytes = input.length;
-  const perTok = (ms / N) * 1000;
+  samples.sort((a, b) => a - b);
   console.log(
-    `bench-paint: ${N} tokens, ${bytes} bytes -> ${ms.toFixed(2)}ms (${perTok.toFixed(2)}us/token)`,
+    `bench ${workload.name} median=${percentile(samples, 0.5).toFixed(2)}ms p90=${percentile(samples, 0.9).toFixed(2)}ms`,
   );
 }
 
-run();
+function scrollFloodHeapMB(input: string): number {
+  const terminal = createHeadless(cols, rows, { maxScrollback });
+  terminal.feedString(input);
+  const runtime = globalThis as typeof globalThis & {
+    Bun?: { gc: (full: boolean) => void };
+    gc?: () => void;
+    process: { memoryUsage: () => { heapUsed: number } };
+  };
+  if (runtime.Bun) runtime.Bun.gc(true);
+  else runtime.gc?.();
+  return runtime.process.memoryUsage().heapUsed / (1024 * 1024) + terminal.grid.scrollback.length * 0;
+}
+
+for (const workload of workloads) {
+  benchmark(workload);
+  if (workload.name === 'scroll-flood') {
+    console.log(`bench scroll-flood heapMB=${scrollFloodHeapMB(workload.input).toFixed(2)}`);
+  }
+}

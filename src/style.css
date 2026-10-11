@@ -67,6 +67,15 @@
    rendered on top of the authoritative grid while the client waits for the
    server's echo. Reduced opacity makes them read as provisional without
    shouting. Rebuilt every paint; kept free of layout-affecting styles. */
+.cloudterm-search-match {
+  position: absolute;
+  display: none;
+  background: #f6c945;
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .cloudterm-predictions {
   position: absolute;
   top: 0;

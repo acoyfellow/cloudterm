@@ -11,6 +11,7 @@
 
 import { AnsiParser, defaultAttr, type CellAttr, type ParserSink } from './parser.js';
 import { Grid } from './grid.js';
+import { searchGrid, type SearchMatch, type SearchOptions } from './search.js';
 
 export { Grid } from './grid.js';
 export { AnsiParser, defaultAttr } from './parser.js';
@@ -29,6 +30,9 @@ export interface Headless {
   feedString(text: string): void;
   /** Resize both dimensions. */
   resize(cols: number, rows: number): void;
+  search(query: string, opts?: SearchOptions): SearchMatch[];
+  serialize(): string;
+  restore(data: string): void;
   /** Collected OSC titles, in arrival order. */
   titles: string[];
   /** Collected OSC 7 current-directory URIs, in arrival order. */
@@ -205,6 +209,15 @@ export function createHeadless(
     },
     resize(c, r) {
       grid.resize(c, r);
+    },
+    search(query, options) {
+      return searchGrid(grid, query, options);
+    },
+    serialize() {
+      return grid.serialize();
+    },
+    restore(data) {
+      grid.restore(data);
     },
     titles,
     cwds,

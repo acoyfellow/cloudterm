@@ -86,6 +86,12 @@ interface Terminal {
   fit(): void;
   focus(): void;
   destroy(): void;
+  search(query: string, opts?: SearchOptions): SearchMatch[];
+  findNext(query: string, opts?: SearchOptions): SearchMatch | null;
+  findPrevious(query: string, opts?: SearchOptions): SearchMatch | null;
+  clearSearch(): void;
+  serialize(): string;
+  restore(data: string): void;
   readonly cols: number;
   readonly rows: number;
 }

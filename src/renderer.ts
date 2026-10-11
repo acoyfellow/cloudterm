@@ -124,7 +124,9 @@ export class DomRenderer {
   sizer: HTMLDivElement;
   surface: HTMLDivElement;
   cursorEl: HTMLSpanElement;
+  searchEl: HTMLSpanElement;
   predictLayer: HTMLDivElement;
+  searchMatch: { line: number; col: number; length: number } | null = null;
 
   charWidth = 8;
   lineHeight = 16;
@@ -157,6 +159,8 @@ export class DomRenderer {
     // (color, blend mode) lives in the CSS class.
     this.cursorEl = document.createElement('span');
     this.cursorEl.className = 'cloudterm-cursor';
+    this.searchEl = document.createElement('span');
+    this.searchEl.className = 'cloudterm-search-match';
     // Prediction overlay lives above lines, below cursor's blend layer. Its
     // children are absolute-positioned ghost glyphs rebuilt every paint.
     this.predictLayer = document.createElement('div');
@@ -164,6 +168,7 @@ export class DomRenderer {
     this.viewport.appendChild(this.sizer);
     this.viewport.appendChild(this.surface);
     this.surface.appendChild(this.predictLayer);
+    this.surface.appendChild(this.searchEl);
     this.surface.appendChild(this.cursorEl);
     this.root.appendChild(this.viewport);
     this.host.appendChild(this.root);
@@ -296,6 +301,22 @@ export class DomRenderer {
     // prediction, steer the cursor to the predicted position so it tracks
     // typing without waiting for the server.
     this.positionCursor();
+    this.positionSearchMatch();
+  }
+
+  setSearchMatch(match: { line: number; col: number; length: number } | null): void {
+    this.searchMatch = match;
+    this.positionSearchMatch();
+  }
+
+  private positionSearchMatch(): void {
+    const match = this.searchMatch;
+    if (!match) { this.searchEl.style.display = 'none'; return; }
+    this.searchEl.style.display = '';
+    this.searchEl.style.top = `${(match.line - this.grid.trimmed) * this.lineHeight}px`;
+    this.searchEl.style.left = `${match.col * this.charWidth}px`;
+    this.searchEl.style.width = `${match.length * this.charWidth}px`;
+    this.searchEl.style.height = `${this.lineHeight}px`;
   }
 
   private positionCursor(): void {

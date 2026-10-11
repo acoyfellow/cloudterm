@@ -67,6 +67,21 @@ export interface DirtyState {
   dirtyLines: Set<number>;
 }
 
+interface SerializedSnapshot {
+  v: 1;
+  cols: number;
+  rows: number;
+  cursor: [number, number];
+  modes: { applicationCursor: boolean; bracketedPaste: boolean; autowrap: boolean; mouseTracking: 0 | 9 | 1000 | 1002 | 1003; mouseSgr: boolean };
+  scrollback: SerializedLine[];
+  screen: SerializedLine[];
+  attrs: CellAttr[];
+  trimmed: number;
+  alt?: boolean;
+}
+
+type SerializedLine = Array<[string, number]>;
+
 export class RingBuffer<T> {
   private values: (T | undefined)[];
   private start = 0;
@@ -628,6 +643,75 @@ export class Grid {
   clearScrollback(): void {
     this.trimmed += this.scrollback.length;
     this.scrollback.clear();
+    this.markAllVisible();
+  }
+
+  serialize(): string {
+    const sourceScreen = this.inAltScreen ? this.mainScreen : this.screen;
+    const sourceScrollback = this.inAltScreen ? this.mainScrollback! : this.scrollback;
+    const sourceTrimmed = this.inAltScreen ? this.mainTrimmed : this.trimmed;
+    const attrs: CellAttr[] = [];
+    const indexes = new Map<string, number>();
+    const line = (cells: Cell[]): SerializedLine => {
+      const runs: SerializedLine = [];
+      let text = '';
+      let index = -1;
+      for (const cell of cells) {
+        const key = JSON.stringify(cell.attr);
+        let next = indexes.get(key);
+        if (next === undefined) {
+          next = attrs.length;
+          indexes.set(key, next);
+          attrs.push({ ...cell.attr });
+        }
+        if (next !== index && text) runs.push([text, index]);
+        if (next !== index) { text = ''; index = next; }
+        text += cell.ch === '' ? '\u0000' : cell.ch;
+      }
+      if (text) runs.push([text, index]);
+      return runs;
+    };
+    const scrollback: SerializedLine[] = [];
+    for (let i = 0; i < sourceScrollback.length; i++) scrollback.push(line(sourceScrollback.get(i)!));
+    return JSON.stringify({ v: 1, cols: this.cols, rows: this.rows, cursor: [this.cursorRow, this.cursorCol], modes: { applicationCursor: this.applicationCursorMode, bracketedPaste: this.bracketedPasteMode, autowrap: this.autoWrapMode, mouseTracking: this.mouseTracking, mouseSgr: this.mouseSgr }, scrollback, screen: sourceScreen.map(line), attrs, trimmed: sourceTrimmed, ...(this.inAltScreen ? { alt: true } : {}) } satisfies SerializedSnapshot);
+  }
+
+  restore(data: string): void {
+    let snapshot: SerializedSnapshot;
+    try { snapshot = JSON.parse(data) as SerializedSnapshot; } catch { throw new Error('Invalid terminal snapshot'); }
+    if (!snapshot || snapshot.v !== 1 || !Number.isInteger(snapshot.cols) || !Number.isInteger(snapshot.rows) || !Array.isArray(snapshot.cursor) || !snapshot.modes || !Array.isArray(snapshot.attrs) || !Array.isArray(snapshot.scrollback) || !Array.isArray(snapshot.screen)) throw new Error('Invalid terminal snapshot');
+    const decode = (runs: SerializedLine): Cell[] => {
+      if (!Array.isArray(runs)) throw new Error('Invalid terminal snapshot');
+      const cells: Cell[] = [];
+      for (const run of runs) {
+        if (!Array.isArray(run) || typeof run[0] !== 'string' || !Number.isInteger(run[1]) || !snapshot.attrs[run[1]]) throw new Error('Invalid terminal snapshot');
+        for (const ch of run[0]) cells.push({ ch: ch === '\u0000' ? '' : ch, attr: { ...snapshot.attrs[run[1]]! } });
+      }
+      return cells;
+    };
+    const scrollbackLines = snapshot.scrollback.map(decode);
+    const screenLines = snapshot.screen.map(decode);
+    if (screenLines.length !== snapshot.rows || snapshot.cols < 1 || snapshot.rows < 1) throw new Error('Invalid terminal snapshot');
+    const fit = (row: Cell[]): Cell[] => row.slice(0, this.cols).concat(Array.from({ length: Math.max(0, this.cols - row.length) }, blankCell));
+    const screen = screenLines.map(fit);
+    while (screen.length > this.rows) scrollbackLines.push(screen.shift()!);
+    while (screen.length < this.rows) screen.push(makeRow(this.cols));
+    const scrollback = new RingBuffer<Cell[]>(this.maxScrollback);
+    const start = Math.max(0, scrollbackLines.length - this.maxScrollback);
+    for (let i = start; i < scrollbackLines.length; i++) scrollback.push(fit(scrollbackLines[i]!));
+    this.inAltScreen = false;
+    this.screen = screen;
+    this.scrollback = scrollback;
+    this.trimmed = Math.max(0, snapshot.trimmed + start);
+    this.cursorRow = Math.max(0, Math.min(this.rows - 1, snapshot.cursor[0]));
+    this.cursorCol = Math.max(0, Math.min(this.cols - 1, snapshot.cursor[1]));
+    this.applicationCursorMode = !!snapshot.modes.applicationCursor;
+    this.bracketedPasteMode = !!snapshot.modes.bracketedPaste;
+    this.autoWrapMode = !!snapshot.modes.autowrap;
+    this.mouseTracking = [0, 9, 1000, 1002, 1003].includes(snapshot.modes.mouseTracking) ? snapshot.modes.mouseTracking : 0;
+    this.mouseSgr = !!snapshot.modes.mouseSgr;
+    this.mainScreen = [];
+    this.mainScrollback = null;
     this.markAllVisible();
   }
 

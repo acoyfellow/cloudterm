@@ -9,6 +9,9 @@ import { encodeMouse, mapMouseCoordinates } from './mouse.js';
 import { PredictionBuffer } from './predict.js';
 import { wcwidth } from './wcwidth.js';
 import { BASE_CSS } from './base-css.js';
+import { searchGrid, type SearchMatch, type SearchOptions } from './search.js';
+
+export type { SearchMatch, SearchOptions } from './search.js';
 
 export type { Theme } from './renderer.js';
 
@@ -34,6 +37,12 @@ export interface Terminal {
   fit(): void;
   focus(): void;
   destroy(): void;
+  search(query: string, opts?: SearchOptions): SearchMatch[];
+  findNext(query: string, opts?: SearchOptions): SearchMatch | null;
+  findPrevious(query: string, opts?: SearchOptions): SearchMatch | null;
+  clearSearch(): void;
+  serialize(): string;
+  restore(data: string): void;
   readonly cols: number;
   readonly rows: number;
 }
@@ -478,6 +487,17 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   // Auto-focus on mount so users can type immediately.
   input.focus();
 
+  let searchCursor = -1;
+  let searchKey = '';
+  const showMatch = (match: SearchMatch | null): SearchMatch | null => {
+    renderer.setSearchMatch(match);
+    if (match) {
+      renderer.viewport.scrollTop = Math.max(0, (match.line - grid.trimmed) * renderer.lineHeight);
+      renderer.paint();
+    }
+    return match;
+  };
+
   const term: Terminal = {
     write(data) {
       if (typeof data === 'string') parser.writeString(data);
@@ -499,6 +519,35 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     },
     focus() {
       input.focus();
+    },
+    search(query, options) {
+      return searchGrid(grid, query, options);
+    },
+    findNext(query, options) {
+      const matches = searchGrid(grid, query, options);
+      const key = JSON.stringify([query, options]);
+      searchCursor = key === searchKey ? (searchCursor + 1) % Math.max(1, matches.length) : 0;
+      searchKey = key;
+      return showMatch(matches[searchCursor] ?? null);
+    },
+    findPrevious(query, options) {
+      const matches = searchGrid(grid, query, options);
+      const key = JSON.stringify([query, options]);
+      searchCursor = key === searchKey ? (searchCursor - 1 + Math.max(1, matches.length)) % Math.max(1, matches.length) : matches.length - 1;
+      searchKey = key;
+      return showMatch(matches[searchCursor] ?? null);
+    },
+    clearSearch() {
+      searchCursor = -1;
+      searchKey = '';
+      showMatch(null);
+    },
+    serialize() {
+      return grid.serialize();
+    },
+    restore(data) {
+      grid.restore(data);
+      renderer.paint();
     },
     destroy() {
       destroyed = true;

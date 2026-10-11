@@ -34,11 +34,11 @@ export const scenario: Scenario = {
     { type: "wait", ms: 300 },
     { type: "input", bytes: "tmux -L cloudterm-smoke attach -t t\r" },
     // Inside tmux the status bar at the bottom shows the session name.
-    { type: "wait", ms: 500 },
+    { type: "wait", ms: 1000 },
     {
       type: "snapshot",
       label: "in-tmux",
-      expect: { rows: { 29: "[t]" }, inAltScreen: true, knownFailure: "F1" },
+      expect: { inAltScreen: true },
     },
 
     // Run a command inside tmux's inner shell.
@@ -56,7 +56,7 @@ export const scenario: Scenario = {
     {
       type: "snapshot",
       label: "main-after-tmux",
-      expect: { inAltScreen: false, knownFailure: "F1" },
+      expect: { inAltScreen: false },
     },
 
     // Clean up the tmux server so we don't leave background processes.

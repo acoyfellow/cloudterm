@@ -185,6 +185,45 @@ describe('Grid alt-screen legacy modes', () => {
   });
 });
 
+describe('Grid DEC private modes and deferred wrap', () => {
+  test('CSI ?25 toggles cursor visibility and dirties its row', () => {
+    const { grid, write } = makeTerm();
+    grid.consumeDirty();
+    write('\x1b[?25l');
+    expect(grid.cursorVisible).toBe(false);
+    expect(grid.consumeDirty().dirtyLines).toEqual(new Set([0]));
+    write('\x1b[?25h');
+    expect(grid.cursorVisible).toBe(true);
+  });
+
+  test('CSI ?7l overwrites the last column', () => {
+    const { grid, write } = makeTerm(3, 2);
+    write('\x1b[?7labcZ');
+    expect(rowText(grid, 0)).toBe('abZ');
+    expect(grid.cursorRow).toBe(0);
+    expect(grid.cursorCol).toBe(2);
+  });
+
+  test('defers wrapping until the next printable character', () => {
+    const { grid, write } = makeTerm(3, 2);
+    write('abc');
+    expect(grid.cursorRow).toBe(0);
+    expect(grid.cursorCol).toBe(2);
+    write('d');
+    expect(rowText(grid, 0)).toBe('abc');
+    expect(rowText(grid, 1)).toBe('d');
+    expect(grid.cursorRow).toBe(1);
+    expect(grid.cursorCol).toBe(1);
+  });
+
+  test('carriage return clears a pending wrap', () => {
+    const { grid, write } = makeTerm(3, 2);
+    write('abc\rZ');
+    expect(rowText(grid, 0)).toBe('Zbc');
+    expect(rowText(grid, 1)).toBe('');
+  });
+});
+
 describe('Grid DECCKM (application cursor mode)', () => {
   test('default is false', () => {
     const { grid } = makeTerm();

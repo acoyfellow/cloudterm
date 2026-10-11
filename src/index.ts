@@ -238,6 +238,13 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
       // Apps that use DECCKM (vim, less) do not local-echo typed keys.
       if (predictions) predictions.clear();
     },
+    setCursorVisible(enabled) {
+      grid.setCursorVisible(enabled);
+    },
+    setAutoWrap(enabled) {
+      grid.setAutoWrap(enabled);
+      if (predictions) predictions.clear();
+    },
     setBracketedPaste(enabled) {
       grid.setBracketedPaste(enabled);
     },

@@ -59,6 +59,8 @@ export interface ParserSink {
   // their bindings match the application form. Pure input-side state; does
   // not affect rendering.
   setApplicationCursorMode(enabled: boolean): void;
+  setCursorVisible(enabled: boolean): void;
+  setAutoWrap(enabled: boolean): void;
   // DEC private mode 2004 (bracketed paste). When enabled, client-side paste
   // wraps pasted text with `ESC [ 200 ~` and `ESC [ 201 ~` so the shell can
   // distinguish it from typed input. Pure input-side state.
@@ -401,6 +403,10 @@ export class AnsiParser {
         for (const ps of this.params) {
           if (ps === 1) {
             this.sink.setApplicationCursorMode(enabled);
+          } else if (ps === 7) {
+            this.sink.setAutoWrap(enabled);
+          } else if (ps === 25) {
+            this.sink.setCursorVisible(enabled);
           } else if (ps === 47) {
             this.sink.setAltScreen(enabled, {
               save: false,

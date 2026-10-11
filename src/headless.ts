@@ -165,6 +165,12 @@ export function createHeadless(
     setApplicationCursorMode(enabled) {
       grid.setApplicationCursorMode(enabled);
     },
+    setCursorVisible(enabled) {
+      grid.setCursorVisible(enabled);
+    },
+    setAutoWrap(enabled) {
+      grid.setAutoWrap(enabled);
+    },
     setBracketedPaste(enabled) {
       grid.setBracketedPaste(enabled);
     },

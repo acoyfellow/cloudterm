@@ -33,11 +33,29 @@ function makeSink(overrides: Partial<ParserSink> = {}): ParserSink {
     title: noop,
     setAltScreen: noop,
     setApplicationCursorMode: noop,
+    setCursorVisible: noop,
+    setAutoWrap: noop,
     setBracketedPaste: noop,
     setCurrentDirectory: noop,
   };
   return { ...base, ...overrides };
 }
+
+describe('AnsiParser DEC private modes', () => {
+  test('CSI ?25 h/l dispatches cursor visibility', () => {
+    const visibility: boolean[] = [];
+    const parser = new AnsiParser(makeSink({ setCursorVisible: (enabled) => visibility.push(enabled) }));
+    parser.writeString('\x1b[?25l\x1b[?25h');
+    expect(visibility).toEqual([false, true]);
+  });
+
+  test('CSI ?7 h/l dispatches auto-wrap', () => {
+    const autoWrap: boolean[] = [];
+    const parser = new AnsiParser(makeSink({ setAutoWrap: (enabled) => autoWrap.push(enabled) }));
+    parser.writeString('\x1b[?7l\x1b[?7h');
+    expect(autoWrap).toEqual([false, true]);
+  });
+});
 
 describe('AnsiParser OSC 7 (current working directory)', () => {
   test('BEL-terminated OSC 7 calls setCurrentDirectory with the URI', () => {

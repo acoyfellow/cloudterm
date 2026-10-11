@@ -64,6 +64,8 @@ export class Grid {
   cursorRow = 0;
   cursorCol = 0;
   cursorVisible = true;
+  autoWrapMode = true;
+  private pendingWrap = false;
 
   private savedRow = 0;
   private savedCol = 0;
@@ -122,6 +124,7 @@ export class Grid {
   }
 
   private setCursorForced(row: number, col: number): void {
+    this.clearPendingWrap();
     this.withCursorMove(() => {
       this.cursorRow = Math.min(this.rows - 1, Math.max(0, row));
       this.cursorCol = Math.min(this.cols - 1, Math.max(0, col));
@@ -152,12 +155,14 @@ export class Grid {
   }
 
   insertLines(n: number): void {
+    this.clearPendingWrap();
     if (this.cursorRow < this.scrollTop || this.cursorRow > this.scrollBottom) return;
     this.scrollRegionDown(this.cursorRow, this.scrollBottom, Math.max(1, n));
     this.cursorCol = 0;
   }
 
   deleteLines(n: number): void {
+    this.clearPendingWrap();
     if (this.cursorRow < this.scrollTop || this.cursorRow > this.scrollBottom) return;
     const count = Math.min(Math.max(1, n), this.scrollBottom - this.cursorRow + 1);
     for (let i = 0; i < count; i++) {
@@ -187,6 +192,7 @@ export class Grid {
   }
 
   eraseChars(n: number): void {
+    this.clearPendingWrap();
     const row = this.screen[this.cursorRow]!;
     const col = Math.min(this.cursorCol, this.cols - 1);
     const end = Math.min(this.cols, col + Math.max(1, n));
@@ -229,6 +235,7 @@ export class Grid {
   // mover, then marks both old and new rows dirty. If the mover itself
   // marked rows, those still stand.
   private withCursorMove(fn: () => void): void {
+    this.clearPendingWrap();
     const oldRow = this.cursorRow;
     fn();
     // Mark old and new cursor rows dirty so the cursor element can be
@@ -248,6 +255,7 @@ export class Grid {
   }
 
   resize(cols: number, rows: number): void {
+    this.clearPendingWrap();
     cols = Math.max(1, cols);
     rows = Math.max(1, rows);
     if (cols === this.cols && rows === this.rows) return;
@@ -309,10 +317,15 @@ export class Grid {
     }
   }
 
+  private clearPendingWrap(): void {
+    this.pendingWrap = false;
+  }
+
   // Move cursor absolute
   setCursor(row: number, col: number): void {
     const nr = Math.min(this.rows - 1, Math.max(0, row));
     const nc = Math.min(this.cols - 1, Math.max(0, col));
+    this.clearPendingWrap();
     // Skip the move entirely if the cursor is already there. Apps often
     // re-send CUP on every redraw and most of them are no-ops.
     if (nr === this.cursorRow && nc === this.cursorCol) return;
@@ -334,7 +347,7 @@ export class Grid {
   }
 
   writeChar(ch: string, attr: CellAttr): void {
-    if (this.cursorCol >= this.cols) this.wrapToNextLine();
+    if (this.pendingWrap) this.wrapToNextLine();
     const row = this.screen[this.cursorRow]!;
     // Share the attr object across adjacent cells. Parser owns attr
     // lifecycle: it clones on SGR change and hands a stable reference
@@ -345,15 +358,21 @@ export class Grid {
     // is the single most-frequent mutation in any shell session.
     this.dirtyLines.add(this.scrollback.length + this.cursorRow);
     this.dirty = true;
-    this.cursorCol += 1;
+    if (this.cursorCol === this.cols - 1) {
+      this.pendingWrap = this.autoWrapMode;
+    } else {
+      this.cursorCol += 1;
+    }
   }
 
   private wrapToNextLine(): void {
+    this.pendingWrap = false;
     this.cursorCol = 0;
     this.lineFeed();
   }
 
   carriageReturn(): void {
+    this.clearPendingWrap();
     // Cursor stays on the same row; mark that row so the cursor span is
     // removed from its old column on rebuild.
     this.markRow(this.cursorRow);
@@ -361,6 +380,7 @@ export class Grid {
   }
 
   lineFeed(): void {
+    this.clearPendingWrap();
     if (this.cursorRow === this.scrollBottom && !this.regionIsFullScreen) {
       this.scrollRegionUp(this.scrollTop, this.scrollBottom, 1);
       return;
@@ -385,6 +405,7 @@ export class Grid {
   }
 
   backspace(): void {
+    this.clearPendingWrap();
     if (this.cursorCol >= this.cols) this.cursorCol = this.cols - 1;
     if (this.cursorCol > 0) {
       this.cursorCol -= 1;
@@ -393,6 +414,7 @@ export class Grid {
   }
 
   tab(): void {
+    this.clearPendingWrap();
     if (this.cursorCol >= this.cols) this.cursorCol = this.cols - 1;
     const next = (Math.floor(this.cursorCol / 8) + 1) * 8;
     this.cursorCol = Math.min(this.cols - 1, next);
@@ -421,6 +443,7 @@ export class Grid {
   }
 
   eraseInDisplay(mode: number): void {
+    this.clearPendingWrap();
     // 0: cursor to end; 1: start to cursor; 2/3: entire screen
     if (mode === 2 || mode === 3) {
       for (let r = 0; r < this.rows; r++) this.screen[r] = makeRow(this.cols);
@@ -439,6 +462,7 @@ export class Grid {
   }
 
   eraseInLine(mode: number): void {
+    this.clearPendingWrap();
     const row = this.screen[this.cursorRow]!;
     if (mode === 1) {
       for (let c = 0; c <= this.cursorCol && c < this.cols; c++) row[c] = blankCell();
@@ -506,6 +530,7 @@ export class Grid {
   //   47  = enter(save=false, clear=false), exit(clear=false, restore=false).
 
   enterAltScreen(save: boolean, clear: boolean): void {
+    this.clearPendingWrap();
     if (this.inAltScreen) {
       if (clear) this.blankBuffer(this.screen);
       if (save) {
@@ -530,6 +555,7 @@ export class Grid {
   }
 
   exitAltScreen(clear: boolean, restore: boolean): void {
+    this.clearPendingWrap();
     if (!this.inAltScreen) {
       if (restore) {
         this.withCursorMove(() => {
@@ -573,6 +599,17 @@ export class Grid {
   // DECCKM setter. No dirty flag: input-only, renderer doesn't care.
   setApplicationCursorMode(enabled: boolean): void {
     this.applicationCursorMode = enabled;
+  }
+
+  setCursorVisible(enabled: boolean): void {
+    if (this.cursorVisible === enabled) return;
+    this.cursorVisible = enabled;
+    this.markRow(this.cursorRow);
+  }
+
+  setAutoWrap(enabled: boolean): void {
+    this.autoWrapMode = enabled;
+    this.clearPendingWrap();
   }
 
   // Bracketed paste setter. No dirty flag: input-only, renderer doesn't care.

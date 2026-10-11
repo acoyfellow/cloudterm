@@ -180,6 +180,10 @@ bun run size
 
 `bun run size` enforces the gzip bundle-size budget.
 
+`bun run dev:demo` starts the live-reloading browser demo.
+
+`bun run demo:check` runs the headless demo check when Chromium is available.
+
 There is also a real-PTY smoke harness:
 
 ```sh

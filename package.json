@@ -41,6 +41,8 @@
     "prebuild": "tsx scripts/gen-css.ts",
     "build": "tsdown",
     "dev": "tsdown --watch",
+    "dev:demo": "bun --hot scripts/dev.ts",
+    "demo:check": "bun scripts/demo-check.ts",
     "typecheck": "tsc --noEmit",
     "pretest": "tsx scripts/gen-css.ts",
     "test": "bun test",

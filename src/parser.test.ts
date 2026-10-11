@@ -111,6 +111,38 @@ describe('AnsiParser DEC private modes', () => {
   });
 });
 
+describe('AnsiParser OSC 52 clipboard writes', () => {
+  test('decodes BEL and ST terminated payloads', () => {
+    const writes: Array<[string, string]> = [];
+    const parser = new AnsiParser(makeSink({ clipboard: (text, selection) => writes.push([text, selection]) }));
+    parser.writeString('\x1b]52;c;aGVsbG8=\x07\x1b]52;p;4pyT\x1b\\');
+    expect(writes).toEqual([['hello', 'c'], ['✓', 'p']]);
+  });
+
+  test('ignores read requests and invalid payloads', () => {
+    const writes: Array<[string, string]> = [];
+    const parser = new AnsiParser(makeSink({ clipboard: (text, selection) => writes.push([text, selection]) }));
+    parser.writeString('\x1b]52;c;?\x07\x1b]52;c;not-base64!\x07');
+    expect(writes).toEqual([]);
+  });
+});
+
+describe('AnsiParser OSC 8 hyperlinks', () => {
+  test('sets and clears links on attrs', () => {
+    const attrs: CellAttr[] = [];
+    const parser = new AnsiParser(makeSink({ setAttr: (attr) => attrs.push(attr) }));
+    parser.writeString('\x1b]8;id=one;https://example.com\x07\x1b]8;;\x1b\\');
+    expect(attrs.map((attr) => attr.link)).toEqual(['https://example.com', undefined]);
+  });
+
+  test('drops disallowed link schemes', () => {
+    const attrs: CellAttr[] = [];
+    const parser = new AnsiParser(makeSink({ setAttr: (attr) => attrs.push(attr) }));
+    parser.writeString('\x1b]8;;javascript:alert(1)\x07');
+    expect(attrs).toEqual([]);
+  });
+});
+
 describe('AnsiParser OSC 7 (current working directory)', () => {
   test('BEL-terminated OSC 7 calls setCurrentDirectory with the URI', () => {
     const cwds: string[] = [];

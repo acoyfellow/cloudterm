@@ -19,6 +19,7 @@ export interface MountOptions {
   // Fires when the shell reports a new working directory via OSC 7. The URI
   // is a `file://` URL (e.g. `file://host/home/user`). No-op if unset.
   onCwd?: (uri: string) => void;
+  onClipboard?: (text: string, selection: string) => void;
   theme?: Partial<Theme>;
   maxScrollback?: number;
   // Speculative local echo. 'auto' (default) paints predicted characters as
@@ -268,6 +269,9 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     setCurrentDirectory(uri) {
       if (opts.onCwd) opts.onCwd(uri);
     },
+    clipboard(text, selection) {
+      opts.onClipboard?.(text, selection);
+    },
   };
 
   const parser = new AnsiParser(sink);
@@ -464,6 +468,12 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   renderer.viewport.addEventListener('mousemove', onMouseMove);
   renderer.viewport.addEventListener('mouseup', onMouseReportUp);
   renderer.viewport.addEventListener('wheel', onWheel, { passive: false });
+  const onLinkClick = (event: MouseEvent): void => {
+    const target = event.target;
+    if (!(target instanceof Element) || !target.closest('a.cloudterm-link')) return;
+    if (grid.mouseTracking !== 0 && !event.ctrlKey && !event.metaKey) event.preventDefault();
+  };
+  renderer.viewport.addEventListener('click', onLinkClick);
 
   // Auto-focus on mount so users can type immediately.
   input.focus();
@@ -502,6 +512,7 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
       renderer.viewport.removeEventListener('mousemove', onMouseMove);
       renderer.viewport.removeEventListener('mouseup', onMouseReportUp);
       renderer.viewport.removeEventListener('wheel', onWheel);
+      renderer.viewport.removeEventListener('click', onLinkClick);
       input.destroy();
       renderer.destroy();
     },

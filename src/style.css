@@ -45,6 +45,12 @@
   white-space: pre;
 }
 
+.cloudterm-link {
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* The cursor is a single long-lived element at the surface root, not a
    child of any line div. z-index lifts it above line text so the blend
    mode mixes with the rendered glyphs beneath it. */

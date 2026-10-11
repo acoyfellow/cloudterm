@@ -741,4 +741,13 @@ describe('Grid cell interning', () => {
     expect(row[2]!.ch).toBe('b\u0301');
     expect(row[0]!.ch).toBe('a');
   });
+
+  test('linked cells share their attr and cells after close do not', () => {
+    const headless = createHeadless(4, 1);
+    headless.feedString('\x1b]8;;https://example.com\x07aa\x1b]8;;\x07b');
+    const row = headless.grid.screen[0]!;
+    expect(row[0]!.attr).toBe(row[1]!.attr);
+    expect(row[0]!.attr.link).toBe('https://example.com');
+    expect(row[2]!.attr.link).toBeUndefined();
+  });
 });

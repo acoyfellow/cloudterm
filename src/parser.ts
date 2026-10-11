@@ -8,6 +8,7 @@ export interface CellAttr {
   italic: boolean;
   underline: boolean;
   reverse: boolean;
+  link?: string;
 }
 
 export function defaultAttr(): CellAttr {
@@ -72,6 +73,7 @@ export interface ParserSink {
   // (e.g. `file://host/home/user`). Consumers typically surface this in a tab
   // title, a breadcrumb, or to spawn new tabs in the same cwd.
   setCurrentDirectory(uri: string): void;
+  clipboard?(text: string, selection: string): void;
 }
 
 // State machine states
@@ -353,8 +355,48 @@ export class AnsiParser {
       this.sink.title(pt);
     } else if (ps === '7') {
       this.sink.setCurrentDirectory(pt);
+    } else if (ps === '8') {
+      this.setLink(pt);
+    } else if (ps === '52') {
+      this.handleClipboard(pt);
     }
     this.state = S_GROUND;
+  }
+
+  private setLink(value: string): void {
+    const separator = value.indexOf(';');
+    if (separator < 0) return;
+    const uri = value.slice(separator + 1);
+    const link = uri === '' ? undefined : this.validLink(uri);
+    if (link === this.attr.link) return;
+    this.attr = { ...this.attr, ...(link === undefined ? { link: undefined } : { link }) };
+    this.sink.setAttr(this.attr);
+  }
+
+  private validLink(uri: string): string | undefined {
+    try {
+      const protocol = new URL(uri).protocol;
+      return protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:' || protocol === 'file:' ? uri : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private handleClipboard(value: string): void {
+    const separator = value.indexOf(';');
+    if (separator < 0) return;
+    const selection = value.slice(0, separator);
+    const payload = value.slice(separator + 1);
+    if (payload === '?' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(payload)) return;
+    try {
+      const decoded = atob(payload);
+      if (decoded.length > 1_000_000) return;
+      const bytes = Uint8Array.from(decoded, (byte) => byte.charCodeAt(0));
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      this.sink.clipboard?.(text, selection);
+    } catch {
+      return;
+    }
   }
 
   private p(i: number, def: number): number {

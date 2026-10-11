@@ -99,8 +99,19 @@ function attrEq(a: CellAttr, b: CellAttr): boolean {
     a.bold === b.bold &&
     a.italic === b.italic &&
     a.underline === b.underline &&
-    a.reverse === b.reverse
+    a.reverse === b.reverse &&
+    a.link === b.link
   );
+}
+
+function safeLink(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:' || protocol === 'mailto:' || protocol === 'file:' ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export class DomRenderer {
@@ -373,9 +384,13 @@ export class DomRenderer {
     flush();
     for (let index = 0; index < runs.length; index++) {
       const run = runs[index]!;
-      const span = div.children[index] as HTMLSpanElement | undefined ?? document.createElement('span');
-      this.emitRun(span, run.text, run.attr, run.width);
-      if (!span.parentElement) div.appendChild(span);
+      const link = safeLink(run.attr.link);
+      const tagName = link ? 'A' : 'SPAN';
+      const existing = div.children[index] as HTMLElement | undefined;
+      const element = existing?.tagName === tagName ? existing : document.createElement(tagName.toLowerCase());
+      if (existing && existing !== element) existing.replaceWith(element);
+      this.emitRun(element, run.text, run.attr, run.width, link);
+      if (!element.parentElement) div.appendChild(element);
     }
     while (div.children.length > runs.length) div.lastElementChild!.remove();
   }
@@ -384,7 +399,7 @@ export class DomRenderer {
     return index + 1 < line.length && line[index + 1]!.ch === '';
   }
 
-  private emitRun(span: HTMLSpanElement, text: string, attr: CellAttr, width = 1): void {
+  private emitRun(element: HTMLElement, text: string, attr: CellAttr, width = 1, link = safeLink(attr.link)): void {
     let fg = attr.fg;
     let bg = attr.bg;
     if (attr.reverse) {
@@ -406,9 +421,20 @@ export class DomRenderer {
       ['width', width === 2 ? `${this.charWidth * 2}px` : ''],
     ];
     for (const [property, value] of styleValues) {
-      if (span.style.getPropertyValue(property) !== value) span.style.setProperty(property, value);
+      if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
     }
-    if (span.textContent !== text) span.textContent = text;
+    if (link) {
+      element.className = 'cloudterm-link';
+      element.setAttribute('href', link);
+      element.setAttribute('target', '_blank');
+      element.setAttribute('rel', 'noopener noreferrer');
+    } else {
+      element.className = '';
+      element.removeAttribute('href');
+      element.removeAttribute('target');
+      element.removeAttribute('rel');
+    }
+    if (element.textContent !== text) element.textContent = text;
   }
 
   scrollToBottom(): void {

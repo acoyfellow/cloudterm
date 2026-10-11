@@ -103,4 +103,26 @@ describe('DomRenderer', () => {
     expect(spans[0]!.style.width).toBe('16px');
     expect(spans[1]!.textContent).toBe('  ');
   });
+
+  test('renders linked runs as safe anchors and replaces them with spans', () => {
+    const { renderer, grid } = createRenderer();
+    grid.writeChar('a', { ...defaultAttr(), link: 'https://example.com/docs' });
+    renderer.paint();
+    const anchor = renderer.surface.querySelector('.cloudterm-line a')!;
+    expect(anchor.getAttribute('href')).toBe('https://example.com/docs');
+    expect(anchor.getAttribute('target')).toBe('_blank');
+    expect(anchor.getAttribute('rel')).toBe('noopener noreferrer');
+    grid.screen[0]![0] = { ch: 'a', attr: defaultAttr() };
+    grid.dirtyAll = true;
+    renderer.paint();
+    expect(renderer.surface.querySelector('.cloudterm-line span')).not.toBeNull();
+    expect(renderer.surface.querySelector('.cloudterm-line a')).toBeNull();
+  });
+
+  test('does not render unsafe links', () => {
+    const { renderer, grid } = createRenderer();
+    grid.writeChar('a', { ...defaultAttr(), link: 'javascript:alert(1)' });
+    renderer.paint();
+    expect(renderer.surface.querySelector('.cloudterm-line a')).toBeNull();
+  });
 });

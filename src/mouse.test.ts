@@ -27,3 +27,14 @@ describe('mapMouseCoordinates', () => {
     expect(mapMouseCoordinates({ clientX: 26, clientY: 45, rect: { left: 10, top: 20 }, charWidth: 8, lineHeight: 16, scrollTop: 48, screenTop: 32 })).toEqual({ col: 3, row: 3 });
   });
 });
+
+describe('mapMouseCoordinates', () => {
+  const base = { rect: { left: 10, top: 20 }, charWidth: 8, lineHeight: 16 };
+  test('maps the top-left cell of the visible screen to 1,1', () => {
+    expect(mapMouseCoordinates({ ...base, clientX: 10, clientY: 20, scrollTop: 0, screenTop: 0 })).toEqual({ col: 1, row: 1 });
+  });
+  test('accounts for scrollback above the screen', () => {
+    const screenTop = 100 * 16;
+    expect(mapMouseCoordinates({ ...base, clientX: 10 + 8 * 4 + 3, clientY: 20 + 16 * 2 + 5, scrollTop: screenTop, screenTop })).toEqual({ col: 5, row: 3 });
+  });
+});

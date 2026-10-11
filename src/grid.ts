@@ -73,8 +73,9 @@ interface SerializedSnapshot {
   rows: number;
   cursor: [number, number];
   modes: { applicationCursor: boolean; bracketedPaste: boolean; autowrap: boolean; mouseTracking: 0 | 9 | 1000 | 1002 | 1003; mouseSgr: boolean };
-  scrollback: SerializedLine[];
-  screen: SerializedLine[];
+  scrollback: number[];
+  screen: number[];
+  lines: SerializedLine[];
   attrs: CellAttr[];
   trimmed: number;
   alt?: boolean;
@@ -671,27 +672,53 @@ export class Grid {
       if (text) runs.push([text, index]);
       return runs;
     };
-    const scrollback: SerializedLine[] = [];
-    for (let i = 0; i < sourceScrollback.length; i++) scrollback.push(line(sourceScrollback.get(i)!));
-    return JSON.stringify({ v: 1, cols: this.cols, rows: this.rows, cursor: [this.cursorRow, this.cursorCol], modes: { applicationCursor: this.applicationCursorMode, bracketedPaste: this.bracketedPasteMode, autowrap: this.autoWrapMode, mouseTracking: this.mouseTracking, mouseSgr: this.mouseSgr }, scrollback, screen: sourceScreen.map(line), attrs, trimmed: sourceTrimmed, ...(this.inAltScreen ? { alt: true } : {}) } satisfies SerializedSnapshot);
+    const lines: SerializedLine[] = [];
+    const lineIndexes = new Map<string, number>();
+    const encodeLine = (cells: Cell[]): number => {
+      const runs = line(cells);
+      const key = JSON.stringify(runs);
+      let index = lineIndexes.get(key);
+      if (index === undefined) {
+        index = lines.length;
+        lineIndexes.set(key, index);
+        lines.push(runs);
+      }
+      return index;
+    };
+    const scrollback: number[] = [];
+    for (let i = 0; i < sourceScrollback.length; i++) scrollback.push(encodeLine(sourceScrollback.get(i)!));
+    return JSON.stringify({ v: 1, cols: this.cols, rows: this.rows, cursor: [this.cursorRow, this.cursorCol], modes: { applicationCursor: this.applicationCursorMode, bracketedPaste: this.bracketedPasteMode, autowrap: this.autoWrapMode, mouseTracking: this.mouseTracking, mouseSgr: this.mouseSgr }, scrollback, screen: sourceScreen.map(encodeLine), lines, attrs, trimmed: sourceTrimmed, ...(this.inAltScreen ? { alt: true } : {}) } satisfies SerializedSnapshot);
   }
 
   restore(data: string): void {
     let snapshot: SerializedSnapshot;
     try { snapshot = JSON.parse(data) as SerializedSnapshot; } catch { throw new Error('Invalid terminal snapshot'); }
-    if (!snapshot || snapshot.v !== 1 || !Number.isInteger(snapshot.cols) || !Number.isInteger(snapshot.rows) || !Array.isArray(snapshot.cursor) || !snapshot.modes || !Array.isArray(snapshot.attrs) || !Array.isArray(snapshot.scrollback) || !Array.isArray(snapshot.screen)) throw new Error('Invalid terminal snapshot');
+    const validAttr = (attr: unknown): attr is CellAttr => {
+      if (!attr || typeof attr !== 'object') return false;
+      const value = attr as Record<string, unknown>;
+      return Number.isInteger(value.fg) && Number.isInteger(value.bg) && typeof value.bold === 'boolean' && typeof value.italic === 'boolean' && typeof value.underline === 'boolean' && typeof value.reverse === 'boolean' && (value.link === undefined || typeof value.link === 'string');
+    };
+    const validMouseTracking = (value: unknown): value is 0 | 9 | 1000 | 1002 | 1003 => value === 0 || value === 9 || value === 1000 || value === 1002 || value === 1003;
+    if (!snapshot || snapshot.v !== 1 || !Number.isInteger(snapshot.cols) || snapshot.cols < 1 || !Number.isInteger(snapshot.rows) || snapshot.rows < 1 || !Array.isArray(snapshot.cursor) || snapshot.cursor.length !== 2 || !snapshot.cursor.every(Number.isInteger) || !snapshot.modes || typeof snapshot.modes !== 'object' || typeof snapshot.modes.applicationCursor !== 'boolean' || typeof snapshot.modes.bracketedPaste !== 'boolean' || typeof snapshot.modes.autowrap !== 'boolean' || !validMouseTracking(snapshot.modes.mouseTracking) || typeof snapshot.modes.mouseSgr !== 'boolean' || !Array.isArray(snapshot.attrs) || !snapshot.attrs.every(validAttr) || !Array.isArray(snapshot.lines) || !Array.isArray(snapshot.scrollback) || !snapshot.scrollback.every(Number.isInteger) || !Array.isArray(snapshot.screen) || !snapshot.screen.every(Number.isInteger) || !Number.isInteger(snapshot.trimmed) || snapshot.trimmed < 0) throw new Error('Invalid terminal snapshot');
     const decode = (runs: SerializedLine): Cell[] => {
       if (!Array.isArray(runs)) throw new Error('Invalid terminal snapshot');
       const cells: Cell[] = [];
       for (const run of runs) {
-        if (!Array.isArray(run) || typeof run[0] !== 'string' || !Number.isInteger(run[1]) || !snapshot.attrs[run[1]]) throw new Error('Invalid terminal snapshot');
+        if (!Array.isArray(run) || run.length !== 2 || typeof run[0] !== 'string' || !Number.isInteger(run[1]) || !snapshot.attrs[run[1]]) throw new Error('Invalid terminal snapshot');
         for (const ch of run[0]) cells.push({ ch: ch === '\u0000' ? '' : ch, attr: { ...snapshot.attrs[run[1]]! } });
       }
+      if (cells.length !== snapshot.cols) throw new Error('Invalid terminal snapshot');
       return cells;
     };
-    const scrollbackLines = snapshot.scrollback.map(decode);
-    const screenLines = snapshot.screen.map(decode);
-    if (screenLines.length !== snapshot.rows || snapshot.cols < 1 || snapshot.rows < 1) throw new Error('Invalid terminal snapshot');
+    const lines = snapshot.lines.map(decode);
+    const resolveLine = (index: number): Cell[] => {
+      const line = lines[index];
+      if (!line) throw new Error('Invalid terminal snapshot');
+      return line;
+    };
+    const scrollbackLines = snapshot.scrollback.map(resolveLine);
+    const screenLines = snapshot.screen.map(resolveLine);
+    if (screenLines.length !== snapshot.rows) throw new Error('Invalid terminal snapshot');
     const fit = (row: Cell[]): Cell[] => row.slice(0, this.cols).concat(Array.from({ length: Math.max(0, this.cols - row.length) }, blankCell));
     const screen = screenLines.map(fit);
     while (screen.length > this.rows) scrollbackLines.push(screen.shift()!);

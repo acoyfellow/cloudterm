@@ -125,4 +125,19 @@ describe('DomRenderer', () => {
     renderer.paint();
     expect(renderer.surface.querySelector('.cloudterm-line a')).toBeNull();
   });
+
+  test('positions and clears the search highlight', () => {
+    const { renderer, grid } = createRenderer(12, 2);
+    grid.writeAscii('foo 日本 bar', defaultAttr());
+    renderer.paint();
+    renderer.setSearchMatch({ line: 0, col: 4, length: 8 });
+    const highlight = renderer.surface.querySelector('.cloudterm-search-match') as HTMLSpanElement;
+    expect(highlight.style.display).toBe('');
+    expect(highlight.style.left).toBe('32px');
+    expect(highlight.style.top).toBe('0px');
+    expect(highlight.style.width).toBe('64px');
+    expect(highlight.style.height).toBe('16px');
+    renderer.setSearchMatch(null);
+    expect(highlight.style.display).toBe('none');
+  });
 });

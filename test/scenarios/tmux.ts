@@ -38,7 +38,7 @@ export const scenario: Scenario = {
     {
       type: "snapshot",
       label: "in-tmux",
-      expect: { inAltScreen: true },
+      expect: { rowPrefixes: { 29: " t 0:zsh*" }, inAltScreen: true },
     },
 
     // Run a command inside tmux's inner shell.

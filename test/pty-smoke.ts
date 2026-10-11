@@ -42,6 +42,7 @@ import type { Cell } from "../src/grid.js";
 
 export interface Expectation {
   rows?: Record<number, string>;
+  rowPrefixes?: Record<number, string>;
   cursor?: { row: number; col: number };
   inAltScreen?: boolean;
   knownFailure?: "F1";
@@ -131,6 +132,14 @@ function checkExpectation(
     if (actual !== expected) {
       differences.push(
         `row ${row}: expected ${JSON.stringify(expected)}, actual ${JSON.stringify(actual)}`,
+      );
+    }
+  }
+  for (const [row, prefix] of Object.entries(expectation.rowPrefixes ?? {})) {
+    const actual = snapshot.screen.split("\n")[Number(row)] ?? "";
+    if (!actual.startsWith(prefix)) {
+      differences.push(
+        `row ${row}: expected prefix ${JSON.stringify(prefix)}, actual ${JSON.stringify(actual)}`,
       );
     }
   }

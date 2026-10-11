@@ -139,6 +139,8 @@ export class Grid {
   // text from the clipboard is wrapped with ESC [ 200 ~ and ESC [ 201 ~ so
   // the shell can distinguish it from keystrokes. No rendering effect.
   bracketedPasteMode = false;
+  mouseTracking: 0 | 9 | 1000 | 1002 | 1003 = 0;
+  mouseSgr = false;
 
   dirty = true;
   dirtyAll = true;
@@ -730,5 +732,13 @@ export class Grid {
   // Bracketed paste setter. No dirty flag: input-only, renderer doesn't care.
   setBracketedPaste(enabled: boolean): void {
     this.bracketedPasteMode = enabled;
+  }
+
+  setMouseTracking(mode: 0 | 9 | 1000 | 1002 | 1003): void {
+    this.mouseTracking = mode;
+  }
+
+  setMouseSgr(enabled: boolean): void {
+    this.mouseSgr = enabled;
   }
 }

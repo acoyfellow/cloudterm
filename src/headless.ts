@@ -178,6 +178,12 @@ export function createHeadless(
     setBracketedPaste(enabled) {
       grid.setBracketedPaste(enabled);
     },
+    setMouseTracking(mode) {
+      grid.setMouseTracking(mode);
+    },
+    setMouseSgr(enabled) {
+      grid.setMouseSgr(enabled);
+    },
     setCurrentDirectory(uri) {
       cwds.push(uri);
     },

@@ -36,6 +36,8 @@ function makeSink(overrides: Partial<ParserSink> = {}): ParserSink {
     setCursorVisible: noop,
     setAutoWrap: noop,
     setBracketedPaste: noop,
+    setMouseTracking: noop,
+    setMouseSgr: noop,
     setCurrentDirectory: noop,
   };
   return { ...base, ...overrides };
@@ -93,6 +95,19 @@ describe('AnsiParser DEC private modes', () => {
     const parser = new AnsiParser(makeSink({ setAutoWrap: (enabled) => autoWrap.push(enabled) }));
     parser.writeString('\x1b[?7l\x1b[?7h');
     expect(autoWrap).toEqual([false, true]);
+  });
+
+  test('mouse tracking and SGR modes dispatch and reset', () => {
+    const tracking: number[] = [];
+    const sgr: boolean[] = [];
+    const parser = new AnsiParser(makeSink({
+      setMouseTracking: (mode) => tracking.push(mode),
+      setMouseSgr: (enabled) => sgr.push(enabled),
+    }));
+    parser.writeString('\x1b[?9h\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h');
+    parser.writeString('\x1b[?1003l\x1b[?1006l\x1bc');
+    expect(tracking).toEqual([9, 1000, 1002, 1003, 0, 0]);
+    expect(sgr).toEqual([true, false, false]);
   });
 });
 

@@ -5,6 +5,7 @@ import type { ParserSink } from './parser.js';
 import { Grid } from './grid.js';
 import { DomRenderer, defaultTheme, type Theme } from './renderer.js';
 import { InputHandler } from './input.js';
+import { encodeMouse, mapMouseCoordinates } from './mouse.js';
 import { PredictionBuffer } from './predict.js';
 import { wcwidth } from './wcwidth.js';
 import { BASE_CSS } from './base-css.js';
@@ -258,6 +259,12 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     setBracketedPaste(enabled) {
       grid.setBracketedPaste(enabled);
     },
+    setMouseTracking(mode) {
+      grid.setMouseTracking(mode);
+    },
+    setMouseSgr(enabled) {
+      grid.setMouseSgr(enabled);
+    },
     setCurrentDirectory(uri) {
       if (opts.onCwd) opts.onCwd(uri);
     },
@@ -400,6 +407,64 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   };
   el.addEventListener('mouseup', onMouseUp);
 
+  let activeMouseButton: 0 | 1 | 2 | 3 = 3;
+  let lastMouseCell: { col: number; row: number } | null = null;
+  const mouseCell = (event: MouseEvent | WheelEvent): { col: number; row: number } => {
+    const rect = renderer.viewport.getBoundingClientRect();
+    const cell = mapMouseCoordinates({
+      clientX: event.clientX,
+      clientY: event.clientY,
+      rect,
+      charWidth: renderer.charWidth,
+      lineHeight: renderer.lineHeight,
+      scrollTop: renderer.viewport.scrollTop,
+      screenTop: grid.scrollback.length * renderer.lineHeight,
+    });
+    return {
+      col: Math.max(1, Math.min(grid.cols, cell.col)),
+      row: Math.max(1, Math.min(grid.rows, cell.row)),
+    };
+  };
+  const reportMouse = (event: MouseEvent | WheelEvent, kind: 'press' | 'release' | 'move' | 'wheel', button: 0 | 1 | 2 | 3, wheelUp?: boolean): void => {
+    if (grid.mouseTracking === 0 || event.shiftKey) return;
+    event.preventDefault();
+    const cell = mouseCell(event);
+    if (kind === 'move' && lastMouseCell?.col === cell.col && lastMouseCell.row === cell.row) return;
+    lastMouseCell = cell;
+    const data = encodeMouse({
+      kind,
+      button,
+      col: cell.col,
+      row: cell.row,
+      shift: event.shiftKey,
+      alt: event.altKey,
+      ctrl: event.ctrlKey,
+      wheelUp,
+    }, { tracking: grid.mouseTracking, sgr: grid.mouseSgr });
+    if (data) opts.onData(new TextEncoder().encode(data));
+  };
+  const onMouseDown = (event: MouseEvent): void => {
+    if (event.button < 0 || event.button > 2) return;
+    activeMouseButton = event.button as 0 | 1 | 2;
+    reportMouse(event, 'press', activeMouseButton);
+  };
+  const onMouseMove = (event: MouseEvent): void => {
+    const button = event.buttons === 0 ? 3 : activeMouseButton;
+    reportMouse(event, 'move', button);
+  };
+  const onMouseReportUp = (event: MouseEvent): void => {
+    if (event.button < 0 || event.button > 2) return;
+    reportMouse(event, 'release', event.button as 0 | 1 | 2);
+    activeMouseButton = 3;
+  };
+  const onWheel = (event: WheelEvent): void => {
+    reportMouse(event, 'wheel', 3, event.deltaY < 0);
+  };
+  renderer.viewport.addEventListener('mousedown', onMouseDown);
+  renderer.viewport.addEventListener('mousemove', onMouseMove);
+  renderer.viewport.addEventListener('mouseup', onMouseReportUp);
+  renderer.viewport.addEventListener('wheel', onWheel, { passive: false });
+
   // Auto-focus on mount so users can type immediately.
   input.focus();
 
@@ -433,6 +498,10 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
       }
       ro.disconnect();
       el.removeEventListener('mouseup', onMouseUp);
+      renderer.viewport.removeEventListener('mousedown', onMouseDown);
+      renderer.viewport.removeEventListener('mousemove', onMouseMove);
+      renderer.viewport.removeEventListener('mouseup', onMouseReportUp);
+      renderer.viewport.removeEventListener('wheel', onWheel);
       input.destroy();
       renderer.destroy();
     },

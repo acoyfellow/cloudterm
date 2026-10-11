@@ -66,6 +66,8 @@ export interface ParserSink {
   // wraps pasted text with `ESC [ 200 ~` and `ESC [ 201 ~` so the shell can
   // distinguish it from typed input. Pure input-side state.
   setBracketedPaste(enabled: boolean): void;
+  setMouseTracking(mode: 0 | 9 | 1000 | 1002 | 1003): void;
+  setMouseSgr(enabled: boolean): void;
   // OSC 7. The shell reports its current working directory as a `file://` URI
   // (e.g. `file://host/home/user`). Consumers typically surface this in a tab
   // title, a breadcrumb, or to spawn new tabs in the same cwd.
@@ -109,6 +111,8 @@ export class AnsiParser {
     // dropped on reset.
     this.utf8Decoder.decode();
     this.pendingHighSurrogate = '';
+    this.sink.setMouseTracking(0);
+    this.sink.setMouseSgr(false);
   }
 
   getAttr(): CellAttr {
@@ -477,6 +481,10 @@ export class AnsiParser {
             });
           } else if (ps === 2004) {
             this.sink.setBracketedPaste(enabled);
+          } else if (ps === 9 || ps === 1000 || ps === 1002 || ps === 1003) {
+            this.sink.setMouseTracking(enabled ? ps : 0);
+          } else if (ps === 1006) {
+            this.sink.setMouseSgr(enabled);
           }
         }
         return;

@@ -31,14 +31,15 @@ export interface Cell {
   attr: CellAttr;
 }
 
+const DEFAULT_ATTR = Object.freeze(defaultAttr());
+const BLANK = Object.freeze({ ch: ' ', attr: DEFAULT_ATTR });
+
 export function blankCell(): Cell {
-  return { ch: ' ', attr: defaultAttr() };
+  return BLANK;
 }
 
 export function makeRow(cols: number): Cell[] {
-  const r = new Array<Cell>(cols);
-  for (let i = 0; i < cols; i++) r[i] = blankCell();
-  return r;
+  return new Array<Cell>(cols).fill(BLANK);
 }
 
 export interface GridSnapshot {

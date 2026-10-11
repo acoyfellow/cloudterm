@@ -35,6 +35,19 @@ const EXIT_47 = '\x1b[?47l';
 const SAVE_1048 = '\x1b[?1048h';
 const RESTORE_1048 = '\x1b[?1048l';
 
+describe('Grid cell isolation', () => {
+  test('writing replaces a shared blank without changing other blanks', () => {
+    const grid = new Grid(3, 1);
+    const neighbour = grid.screen[0]![1]!;
+    const freshGrid = new Grid(3, 1);
+    grid.writeChar('x', defaultAttr());
+    expect(grid.screen[0]![0]!.ch).toBe('x');
+    expect(grid.screen[0]![1]!).toBe(neighbour);
+    expect(grid.screen[0]![1]!.ch).toBe(' ');
+    expect(freshGrid.screen[0]![0]!.ch).toBe(' ');
+  });
+});
+
 describe('Grid Unicode cells', () => {
   test('stores wide characters in two cells', () => {
     const { grid, write } = makeTerm(8, 2);

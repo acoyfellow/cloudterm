@@ -23,7 +23,7 @@
 // even though the line is still marked dirty.
 
 import type { CellAttr } from './parser.js';
-import { defaultAttr } from './parser.js';
+import { DEFAULT_ATTR } from './parser.js';
 import { wcwidth } from './wcwidth.js';
 
 export interface Cell {
@@ -31,7 +31,6 @@ export interface Cell {
   attr: CellAttr;
 }
 
-const DEFAULT_ATTR = Object.freeze(defaultAttr());
 const BLANK = Object.freeze({ ch: ' ', attr: DEFAULT_ATTR });
 const cellCache = new WeakMap<CellAttr, Cell[]>();
 
@@ -161,6 +160,9 @@ export class Grid {
   dirty = true;
   dirtyAll = true;
   dirtyLines = new Set<number>();
+  private dirtyRows: Uint32Array;
+  private tick = 1;
+  private skip = false;
 
   constructor(cols: number, rows: number, maxScrollback = 10_000) {
     this.cols = Math.max(1, cols);
@@ -169,6 +171,7 @@ export class Grid {
     this.scrollback = new RingBuffer<Cell[]>(this.maxScrollback);
     this.screen = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.altScreen = Array.from({ length: this.rows }, () => makeRow(this.cols));
+    this.dirtyRows = new Uint32Array(this.rows);
     this.scrollBottom = this.rows - 1;
   }
 
@@ -281,22 +284,29 @@ export class Grid {
 
   private markRow(screenRow: number): void {
     if (screenRow < 0 || screenRow >= this.rows) return;
-    this.dirtyLines.add(this.absOf(screenRow));
+    if (!this.skip && this.dirtyRows[screenRow] !== this.tick) {
+      this.dirtyRows[screenRow] = this.tick;
+      this.dirtyLines.add(this.absOf(screenRow));
+    }
     this.dirty = true;
   }
 
   private markRange(rStart: number, rEnd: number): void {
     const a = Math.max(0, rStart);
     const b = Math.min(this.rows - 1, rEnd);
-    for (let r = a; r <= b; r++) this.dirtyLines.add(this.absOf(r));
-    this.dirty = true;
+    for (let r = a; r <= b; r++) this.markRow(r);
+  }
+
+  private pruneDirty(): void {
+    const top = this.absOf(0);
+    for (const line of this.dirtyLines) if (line < top) this.dirtyLines.delete(line);
   }
 
   private markAllVisible(): void {
     this.dirtyAll = true;
+    this.dirtyLines.clear();
+    this.skip = true;
     this.dirty = true;
-    // dirtyLines will be ignored while dirtyAll is set; keep it for any
-    // caller that wants to union, but don't bother building up a full set.
   }
 
   // Called around cursor-moving ops. Captures old cursor row, runs the
@@ -318,7 +328,13 @@ export class Grid {
     const state: DirtyState = { dirtyAll: this.dirtyAll, dirtyLines: this.dirtyLines };
     this.dirtyAll = false;
     this.dirtyLines = new Set<number>();
+    this.skip = false;
     this.dirty = false;
+    this.tick += 1;
+    if (this.tick === 0) {
+      this.dirtyRows.fill(0);
+      this.tick = 1;
+    }
     return state;
   }
 
@@ -337,6 +353,8 @@ export class Grid {
 
     this.cols = cols;
     this.rows = rows;
+    this.dirtyRows = new Uint32Array(rows);
+    this.tick = 1;
     this.scrollTop = 0;
     this.scrollBottom = rows - 1;
     if (this.cursorRow >= rows) this.cursorRow = rows - 1;
@@ -449,8 +467,7 @@ export class Grid {
       this.clearCell(row, this.cursorCol + 1);
       row[this.cursorCol + 1] = { ch: '', attr };
     }
-    this.dirtyLines.add(this.absOf(this.cursorRow));
-    this.dirty = true;
+    this.markRow(this.cursorRow);
     const next = this.cursorCol + width;
     if (next >= this.cols) {
       this.cursorCol = this.cols - 1;
@@ -527,6 +544,9 @@ export class Grid {
       if (gone) this.pushScrollback(gone);
       this.screen.push(makeRow(this.cols));
       // New bottom row's absolute index is the one the cursor is on now.
+      this.dirtyRows.copyWithin(0, 1);
+      this.dirtyRows[this.rows - 1] = 0;
+      if (this.dirtyLines.size > this.rows * 2) this.pruneDirty();
       this.markRow(this.cursorRow);
     }
     this.dirty = true;

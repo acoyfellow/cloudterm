@@ -15,6 +15,21 @@ export function defaultAttr(): CellAttr {
   return { fg: -1, bg: -1, bold: false, italic: false, underline: false, reverse: false };
 }
 
+export const DEFAULT_ATTR: CellAttr = Object.freeze(defaultAttr());
+
+const cache = new Map<string, CellAttr>();
+
+function canonicalAttr(attr: CellAttr): CellAttr {
+  const key = `${attr.fg},${attr.bg},${+attr.bold}${+attr.italic}${+attr.underline}${+attr.reverse},${attr.link ?? ''}`;
+  if (key === '-1,-1,0000,') return DEFAULT_ATTR;
+  const existing = cache.get(key);
+  if (existing) return existing;
+  if (cache.size >= 4096) cache.clear();
+  const canonical = Object.freeze({ ...attr });
+  cache.set(key, canonical);
+  return canonical;
+}
+
 export interface ParserSink {
   print(ch: string): void;
   printRun?(text: string): void;
@@ -93,7 +108,7 @@ export class AnsiParser {
   private currentParam = -1; // -1 means "empty"
   private intermediate = '';
   private oscBuf = '';
-  private attr: CellAttr = defaultAttr();
+  private attr: CellAttr = DEFAULT_ATTR;
   // Streaming UTF-8 decoder. Buffers partial multi-byte sequences across
   // calls internally, so chunk boundaries in the middle of a codepoint
   // are handled natively without a userspace pending-bytes array.
@@ -108,11 +123,11 @@ export class AnsiParser {
     this.currentParam = -1;
     this.intermediate = '';
     this.oscBuf = '';
-    this.attr = defaultAttr();
     // Flush the streaming decoder so any buffered partial bytes are
     // dropped on reset.
     this.utf8Decoder.decode();
     this.pendingHighSurrogate = '';
+    this.attr = DEFAULT_ATTR;
     this.sink.setMouseTracking(0);
     this.sink.setMouseSgr(false);
   }
@@ -369,7 +384,7 @@ export class AnsiParser {
     const uri = value.slice(separator + 1);
     const link = uri === '' ? undefined : this.validLink(uri);
     if (link === this.attr.link) return;
-    this.attr = { ...this.attr, ...(link === undefined ? { link: undefined } : { link }) };
+    this.attr = canonicalAttr({ ...this.attr, ...(link === undefined ? { link: undefined } : { link }) });
     this.sink.setAttr(this.attr);
   }
 
@@ -551,7 +566,7 @@ export class AnsiParser {
     // cells written under the previous attr.
     const ps = this.params;
     if (ps.length === 0 || (ps.length === 1 && ps[0]! < 0)) {
-      this.attr = defaultAttr();
+      this.attr = DEFAULT_ATTR;
       this.sink.setAttr(this.attr);
       return;
     }
@@ -617,7 +632,7 @@ export class AnsiParser {
         next.bg = n - 100 + 8;
       }
     }
-    this.attr = next;
+    this.attr = canonicalAttr(next);
     this.sink.setAttr(this.attr);
   }
 }

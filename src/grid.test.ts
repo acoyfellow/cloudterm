@@ -506,12 +506,52 @@ describe('Grid ring-buffer scrollback', () => {
   });
 });
 
+describe('Grid attrs', () => {
+  test('uses canonical attrs for SGR cells and blank cells', () => {
+    const { grid, write } = makeTerm(10, 2);
+    write('\x1b[32mA\x1b[0mB\x1b[32mC');
+    expect(grid.screen[0]![0]!.attr).toBe(grid.screen[0]![2]!.attr);
+    expect(grid.screen[0]![1]!.attr).toBe(grid.screen[1]![0]!.attr);
+  });
+});
+
 describe('Grid per-line dirty tracking', () => {
   // Drain whatever dirty state has accumulated since creation so tests can
   // reason about a single subsequent mutation in isolation.
   function reset(grid: Grid): void {
     grid.consumeDirty();
   }
+
+  test('writes on one row add one dirty line', () => {
+    const { grid, write } = makeTerm(120, 2);
+    reset(grid);
+    write('x'.repeat(120));
+    expect(grid.consumeDirty().dirtyLines.size).toBe(1);
+  });
+
+  test('full redraw scrolling keeps a bounded dirty set covering every visible row', () => {
+    const { grid, write } = makeTerm(20, 4);
+    reset(grid);
+    const frame = '\x1b[H' + ('x'.repeat(20) + '\r\n').repeat(4);
+    write(frame.repeat(2_000));
+    const dirty = grid.consumeDirty();
+    const top = grid.trimmed + grid.scrollback.length;
+    expect(dirty.dirtyAll).toBe(false);
+    expect(dirty.dirtyLines.size).toBeLessThanOrEqual(grid.rows * 2 + 1);
+    for (let row = 0; row < grid.rows; row++) expect(dirty.dirtyLines.has(top + row)).toBe(true);
+  });
+
+  test('a row scrolled up is still marked when it changes again in the same paint', () => {
+    const { grid, write } = makeTerm(10, 3);
+    reset(grid);
+    write('a\r\nb\r\nc');
+    write('\r\nd');
+    write('\x1b[1;1HZ');
+    const dirty = grid.consumeDirty();
+    const top = grid.trimmed + grid.scrollback.length;
+    expect(dirty.dirtyLines.has(top)).toBe(true);
+    expect(grid.getLine(top)[0]!.ch).toBe('Z');
+  });
 
   test('writing one character marks exactly one absolute index dirty', () => {
     const { grid, write } = makeTerm(20, 6);

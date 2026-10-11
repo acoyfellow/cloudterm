@@ -52,7 +52,7 @@
     "smoke": "tsx test/runner.ts"
   },
   "sizeBudget": {
-    "dist/index.js": 14080
+    "dist/index.js": 14336
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.5"

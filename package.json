@@ -48,6 +48,7 @@
     "test": "bun test",
     "size": "tsx scripts/size.ts",
     "bench": "tsx test/bench-paint.ts",
+    "bench:compare": "bun test/bench-compare.ts",
     "smoke": "tsx test/runner.ts"
   },
   "sizeBudget": {

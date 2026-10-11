@@ -406,6 +406,48 @@ describe('Grid alt-screen renderer-facing surface', () => {
   });
 });
 
+describe('Grid ring-buffer scrollback', () => {
+  test('retains the newest rows under stable absolute indexes', () => {
+    const grid = new Grid(4, 1, 3);
+    for (let i = 0; i < 10; i++) {
+      grid.screen[0]![0] = { ch: String(i), attr: defaultAttr() };
+      grid.lineFeed();
+    }
+
+    expect(grid.scrollback.length).toBe(3);
+    expect(grid.trimmed).toBe(7);
+    expect(['7', '8', '9']).toEqual([7, 8, 9].map((index) => grid.getLine(index)[0]!.ch));
+  });
+
+  test('scrolling with a full ring marks only the new bottom row', () => {
+    const grid = new Grid(4, 2, 1);
+    grid.lineFeed();
+    grid.lineFeed();
+    grid.consumeDirty();
+
+    grid.lineFeed();
+
+    const dirty = grid.consumeDirty();
+    expect(dirty.dirtyAll).toBe(false);
+    expect(dirty.dirtyLines).toEqual(new Set([grid.trimmed + grid.scrollback.length + grid.cursorRow]));
+  });
+
+  test('preserves a full main ring across an alternate-screen swap', () => {
+    const grid = new Grid(4, 1, 2);
+    for (const ch of ['a', 'b', 'c']) {
+      grid.screen[0]![0] = { ch, attr: defaultAttr() };
+      grid.lineFeed();
+    }
+    const history = [grid.getLine(grid.trimmed)[0]!.ch, grid.getLine(grid.trimmed + 1)[0]!.ch];
+
+    grid.enterAltScreen(false, true);
+    grid.exitAltScreen(false, false);
+
+    expect(grid.scrollback.length).toBe(2);
+    expect([grid.getLine(grid.trimmed)[0]!.ch, grid.getLine(grid.trimmed + 1)[0]!.ch]).toEqual(history);
+  });
+});
+
 describe('Grid per-line dirty tracking', () => {
   // Drain whatever dirty state has accumulated since creation so tests can
   // reason about a single subsequent mutation in isolation.
@@ -421,7 +463,7 @@ describe('Grid per-line dirty tracking', () => {
     expect(d.dirtyAll).toBe(false);
     // Cursor started at (0,0); writeChar mutates row 0 and moves cursor
     // along the same row. Only row 0 should be dirty.
-    const abs = grid.scrollback.length + 0;
+    const abs = grid.trimmed + grid.scrollback.length;
     expect([...d.dirtyLines].sort()).toEqual([abs]);
   });
 
@@ -460,7 +502,7 @@ describe('Grid per-line dirty tracking', () => {
     expect(d.dirtyAll).toBe(false);
     // The new bottom row's abs index is scrollback.length + cursorRow
     // = 1 + 2 = 3. That row must be in the dirty set.
-    const newBottomAbs = grid.scrollback.length + grid.cursorRow;
+    const newBottomAbs = grid.trimmed + grid.scrollback.length + grid.cursorRow;
     expect(d.dirtyLines.has(newBottomAbs)).toBe(true);
   });
 
@@ -501,8 +543,8 @@ describe('Grid per-line dirty tracking', () => {
     expect(newRow).toBe(oldRow + 1);
     const d = grid.consumeDirty();
     expect(d.dirtyAll).toBe(false);
-    const oldAbs = grid.scrollback.length + oldRow;
-    const newAbs = grid.scrollback.length + newRow;
+    const oldAbs = grid.trimmed + grid.scrollback.length + oldRow;
+    const newAbs = grid.trimmed + grid.scrollback.length + newRow;
     expect(d.dirtyLines.has(oldAbs)).toBe(true);
     expect(d.dirtyLines.has(newAbs)).toBe(true);
     expect(d.dirtyLines.size).toBe(2);
@@ -519,7 +561,7 @@ describe('Grid per-line dirty tracking', () => {
     expect(grid.cursorCol).toBe(5);
     const d = grid.consumeDirty();
     expect(d.dirtyAll).toBe(false);
-    const abs = grid.scrollback.length + row;
+    const abs = grid.trimmed + grid.scrollback.length + row;
     expect([...d.dirtyLines]).toEqual([abs]);
   });
 });

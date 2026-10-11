@@ -11,7 +11,7 @@ const screenOf = (bytes: Uint8Array) => {
   const term = createHeadless(COLS, ROWS);
   term.feed(bytes);
   const grid = term.grid;
-  const top = grid.scrollback.length;
+  const top = grid.trimmed + grid.scrollback.length;
   const lines: string[] = [];
   for (let r = 0; r < ROWS; r++) lines.push(grid.getLine(top + r).map((cell) => cell.ch).join('').trimEnd());
   return { lines, cursor: [grid.cursorRow, grid.cursorCol] };

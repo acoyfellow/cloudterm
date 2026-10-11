@@ -67,13 +67,45 @@ export interface DirtyState {
   dirtyLines: Set<number>;
 }
 
+export class RingBuffer<T> {
+  private values: (T | undefined)[];
+  private start = 0;
+  length = 0;
+
+  constructor(private readonly capacity: number) {
+    this.values = new Array<T | undefined>(capacity);
+  }
+
+  push(value: T): boolean {
+    if (this.capacity === 0) return false;
+    const overwrote = this.length === this.capacity;
+    const index = (this.start + this.length) % this.capacity;
+    this.values[index] = value;
+    if (overwrote) this.start = (this.start + 1) % this.capacity;
+    else this.length += 1;
+    return overwrote;
+  }
+
+  get(index: number): T | undefined {
+    if (index < 0 || index >= this.length) return undefined;
+    return this.values[(this.start + index) % this.capacity];
+  }
+
+  clear(): void {
+    this.values.fill(undefined);
+    this.start = 0;
+    this.length = 0;
+  }
+}
+
 export class Grid {
   cols: number;
   rows: number;
   maxScrollback: number;
 
   screen: Cell[][] = [];
-  scrollback: Cell[][] = [];
+  scrollback: RingBuffer<Cell[]>;
+  trimmed = 0;
 
   cursorRow = 0;
   cursorCol = 0;
@@ -93,7 +125,8 @@ export class Grid {
   inAltScreen = false;
   private altScreen: Cell[][] = [];
   private mainScreen: Cell[][] = [];
-  private mainScrollback: Cell[][] = [];
+  private mainScrollback: RingBuffer<Cell[]> | null = null;
+  private mainTrimmed = 0;
   private altReturnRow = 0;
   private altReturnCol = 0;
 
@@ -115,6 +148,7 @@ export class Grid {
     this.cols = Math.max(1, cols);
     this.rows = Math.max(1, rows);
     this.maxScrollback = Math.max(0, maxScrollback);
+    this.scrollback = new RingBuffer<Cell[]>(this.maxScrollback);
     this.screen = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.altScreen = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.scrollBottom = this.rows - 1;
@@ -224,7 +258,7 @@ export class Grid {
   // Absolute line index of the given screen row. Stable reference the renderer
   // uses to key its DOM map.
   private absOf(screenRow: number): number {
-    return this.scrollback.length + screenRow;
+    return this.trimmed + this.scrollback.length + screenRow;
   }
 
   private markRow(screenRow: number): void {
@@ -321,16 +355,7 @@ export class Grid {
     // inside less, vim, tmux, etc. must not leak into the user's history.
     if (this.inAltScreen) return;
     if (this.maxScrollback === 0) return;
-    this.scrollback.push(row);
-    if (this.scrollback.length > this.maxScrollback) {
-      const drop = this.scrollback.length - this.maxScrollback;
-      this.scrollback.splice(0, drop);
-      // Overflow: every previously-tracked dirty absolute index shifted
-      // down by `drop`. Rather than rewriting the set, just force a full
-      // repaint. This is rare (only when the scrollback cap is reached)
-      // and only costs one extra frame.
-      if (this.dirtyLines.size > 0) this.markAllVisible();
-    }
+    if (this.scrollback.push(row)) this.trimmed += 1;
   }
 
   private clearPendingWrap(): void {
@@ -383,7 +408,7 @@ export class Grid {
       this.clearCell(row, this.cursorCol + 1);
       row[this.cursorCol + 1] = { ch: '', attr };
     }
-    this.dirtyLines.add(this.scrollback.length + this.cursorRow);
+    this.dirtyLines.add(this.absOf(this.cursorRow));
     this.dirty = true;
     const next = this.cursorCol + width;
     if (next >= this.cols) {
@@ -569,14 +594,15 @@ export class Grid {
   }
 
   getLine(index: number): Cell[] {
-    if (index < this.scrollback.length) return this.scrollback[index]!;
-    const r = this.screen[index - this.scrollback.length];
+    const relative = index - this.trimmed;
+    if (relative >= 0 && relative < this.scrollback.length) return this.scrollback.get(relative)!;
+    const r = this.screen[relative - this.scrollback.length];
     return r ?? makeRow(this.cols);
   }
 
   clearScrollback(): void {
-    this.scrollback = [];
-    // All visible-line absolute indexes just shifted down. Safest to repaint.
+    this.trimmed += this.scrollback.length;
+    this.scrollback.clear();
     this.markAllVisible();
   }
 
@@ -609,8 +635,10 @@ export class Grid {
     // Stash main, swap alt in.
     this.mainScreen = this.screen;
     this.mainScrollback = this.scrollback;
+    this.mainTrimmed = this.trimmed;
     this.screen = this.altScreen;
-    this.scrollback = [];
+    this.scrollback = new RingBuffer<Cell[]>(this.maxScrollback);
+    this.trimmed = 0;
     this.inAltScreen = true;
     if (clear) this.blankBuffer(this.screen);
     this.markAllVisible();
@@ -631,9 +659,11 @@ export class Grid {
     // Swap back.
     this.altScreen = this.screen;
     this.screen = this.mainScreen;
-    this.scrollback = this.mainScrollback;
+    this.scrollback = this.mainScrollback!;
+    this.trimmed = this.mainTrimmed;
     this.mainScreen = [];
-    this.mainScrollback = [];
+    this.mainScrollback = null;
+    this.mainTrimmed = 0;
     this.inAltScreen = false;
     if (restore) {
       this.cursorRow = Math.min(this.rows - 1, Math.max(0, this.altReturnRow));

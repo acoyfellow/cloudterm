@@ -225,8 +225,8 @@ export class DomRenderer {
     const scrollTop = vp.scrollTop;
     const vpHeight = vp.clientHeight || this.grid.rows * this.lineHeight;
 
-    const first = Math.max(0, Math.floor(scrollTop / this.lineHeight) - this.overscan);
-    const last = Math.min(
+    const first = this.grid.trimmed + Math.max(0, Math.floor(scrollTop / this.lineHeight) - this.overscan);
+    const last = this.grid.trimmed + Math.min(
       total - 1,
       Math.ceil((scrollTop + vpHeight) / this.lineHeight) + this.overscan,
     );
@@ -252,7 +252,7 @@ export class DomRenderer {
       const existing = this.rendered.get(i);
       const mustRebuild = dirtyAll || dirtyLines.has(i);
       if (existing) {
-        existing.style.top = `${i * this.lineHeight}px`;
+        existing.style.top = `${(i - this.grid.trimmed) * this.lineHeight}px`;
         if (mustRebuild) {
           this.renderLineInto(existing, this.grid.getLine(i));
         }
@@ -260,7 +260,7 @@ export class DomRenderer {
       }
       const div = document.createElement('div');
       div.className = 'cloudterm-line';
-      div.style.top = `${i * this.lineHeight}px`;
+      div.style.top = `${(i - this.grid.trimmed) * this.lineHeight}px`;
       div.style.height = `${this.lineHeight}px`;
       this.renderLineInto(div, this.grid.getLine(i));
       this.surface.appendChild(div);
@@ -291,9 +291,9 @@ export class DomRenderer {
       row = latest.row;
       col = latest.col;
     }
-    const cursorAbs = this.grid.scrollback.length + row;
+    const cursorAbs = this.grid.trimmed + this.grid.scrollback.length + row;
     this.cursorEl.style.display = '';
-    this.cursorEl.style.top = `${cursorAbs * this.lineHeight}px`;
+    this.cursorEl.style.top = `${(cursorAbs - this.grid.trimmed) * this.lineHeight}px`;
     this.cursorEl.style.left = `${col * this.charWidth}px`;
     this.cursorEl.style.width = `${this.charWidth}px`;
     this.cursorEl.style.height = `${this.lineHeight}px`;
@@ -324,10 +324,10 @@ export class DomRenderer {
       // no visual benefit to the overlay (and a risk of subpixel ghosting).
       const line = this.grid.screen[p.row];
       if (line && line[p.col] && line[p.col]!.ch === p.ch) continue;
-      const abs = scrollbackLen + p.row;
+      const abs = this.grid.trimmed + scrollbackLen + p.row;
       const span = document.createElement('span');
       span.className = 'cloudterm-predict';
-      span.style.top = `${abs * this.lineHeight}px`;
+      span.style.top = `${(abs - this.grid.trimmed) * this.lineHeight}px`;
       span.style.left = `${p.col * this.charWidth}px`;
       span.style.width = `${this.charWidth}px`;
       span.style.height = `${this.lineHeight}px`;

@@ -35,6 +35,40 @@ const EXIT_47 = '\x1b[?47l';
 const SAVE_1048 = '\x1b[?1048h';
 const RESTORE_1048 = '\x1b[?1048l';
 
+describe('Grid Unicode cells', () => {
+  test('stores wide characters in two cells', () => {
+    const { grid, write } = makeTerm(8, 2);
+    write('日本');
+    expect(grid.cursorCol).toBe(4);
+    expect(grid.screen[0]![1]!.ch).toBe('');
+    expect(grid.screen[0]![3]!.ch).toBe('');
+  });
+
+  test('wraps a wide character from the last column after padding it', () => {
+    const { grid, write } = makeTerm(3, 2);
+    write('ab日');
+    expect(grid.screen[0]![2]!.ch).toBe(' ');
+    expect(grid.screen[1]![0]!.ch).toBe('日');
+    expect(grid.screen[1]![1]!.ch).toBe('');
+  });
+
+  test('overwriting a continuation clears the wide character', () => {
+    const { grid, write } = makeTerm(5, 2);
+    write('日');
+    grid.setCursor(0, 1);
+    write('x');
+    expect(grid.screen[0]![0]!.ch).toBe(' ');
+    expect(grid.screen[0]![1]!.ch).toBe('x');
+  });
+
+  test('appends combining marks to the preceding cell', () => {
+    const { grid, write } = makeTerm(5, 2);
+    write('e\u0301');
+    expect(grid.cursorCol).toBe(1);
+    expect(grid.screen[0]![0]!.ch).toBe('e\u0301');
+  });
+});
+
 describe('Grid alt-screen buffer via CSI ?1049', () => {
   test('main screen content is preserved across enter/write/exit cycle', () => {
     const { grid, write } = makeTerm(20, 6);

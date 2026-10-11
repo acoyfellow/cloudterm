@@ -6,6 +6,7 @@ import { Grid } from './grid.js';
 import { DomRenderer, defaultTheme, type Theme } from './renderer.js';
 import { InputHandler } from './input.js';
 import { PredictionBuffer } from './predict.js';
+import { wcwidth } from './wcwidth.js';
 
 export type { Theme } from './renderer.js';
 
@@ -313,6 +314,7 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
           predictions.prune(now);
           const { row, col } = effectiveCursor();
           if (ev.kind === 'char') {
+            if (wcwidth(ev.ch) !== 1) return;
             // Only predict within the current row. At end-of-line the shell
             // may wrap differently; let the server's echo be authoritative.
             if (col >= grid.cols) return;

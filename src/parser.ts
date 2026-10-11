@@ -93,6 +93,7 @@ export class AnsiParser {
   // calls internally, so chunk boundaries in the middle of a codepoint
   // are handled natively without a userspace pending-bytes array.
   private utf8Decoder = new TextDecoder('utf-8', { fatal: false });
+  private pendingHighSurrogate = '';
 
   constructor(private sink: ParserSink) {}
 
@@ -106,6 +107,7 @@ export class AnsiParser {
     // Flush the streaming decoder so any buffered partial bytes are
     // dropped on reset.
     this.utf8Decoder.decode();
+    this.pendingHighSurrogate = '';
   }
 
   getAttr(): CellAttr {
@@ -118,10 +120,35 @@ export class AnsiParser {
   }
 
   writeString(text: string): void {
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i]!;
-      const code = ch.charCodeAt(0);
-      this.step(ch, code);
+    let index = 0;
+    if (this.pendingHighSurrogate) {
+      const first = text.charCodeAt(0);
+      if (first >= 0xdc00 && first <= 0xdfff) {
+        const ch = this.pendingHighSurrogate + text[0]!;
+        this.step(ch, ch.codePointAt(0)!);
+        index = 1;
+      } else {
+        this.step(this.pendingHighSurrogate, this.pendingHighSurrogate.charCodeAt(0));
+      }
+      this.pendingHighSurrogate = '';
+    }
+    for (; index < text.length; index++) {
+      const first = text.charCodeAt(index);
+      if (first >= 0xd800 && first <= 0xdbff) {
+        if (index + 1 < text.length) {
+          const second = text.charCodeAt(index + 1);
+          if (second >= 0xdc00 && second <= 0xdfff) {
+            const ch = text.slice(index, index + 2);
+            this.step(ch, ch.codePointAt(0)!);
+            index += 1;
+            continue;
+          }
+        }
+        this.pendingHighSurrogate = text[index]!;
+        continue;
+      }
+      const ch = text[index]!;
+      this.step(ch, first);
     }
   }
 

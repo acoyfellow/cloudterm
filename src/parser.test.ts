@@ -41,6 +41,23 @@ function makeSink(overrides: Partial<ParserSink> = {}): ParserSink {
   return { ...base, ...overrides };
 }
 
+describe('AnsiParser Unicode input', () => {
+  test('prints an emoji once', () => {
+    const printed: string[] = [];
+    const parser = new AnsiParser(makeSink({ print: (ch) => printed.push(ch) }));
+    parser.writeString('\u{1f600}');
+    expect(printed).toEqual(['\u{1f600}']);
+  });
+
+  test('joins a surrogate pair split across writes', () => {
+    const printed: string[] = [];
+    const parser = new AnsiParser(makeSink({ print: (ch) => printed.push(ch) }));
+    parser.writeString('\ud83d');
+    parser.writeString('\ude00');
+    expect(printed).toEqual(['\u{1f600}']);
+  });
+});
+
 describe('AnsiParser DEC private modes', () => {
   test('CSI ?25 h/l dispatches cursor visibility', () => {
     const visibility: boolean[] = [];

@@ -24,6 +24,7 @@
 
 import type { CellAttr } from './parser.js';
 import { defaultAttr } from './parser.js';
+import { wcwidth } from './wcwidth.js';
 
 export interface Cell {
   ch: string; // single grapheme or empty
@@ -179,6 +180,7 @@ export class Grid {
     const count = Math.min(Math.max(1, n), this.cols - col);
     row.splice(col, 0, ...Array.from({ length: count }, blankCell));
     row.length = this.cols;
+    this.normalizeRow(row);
     this.markRow(this.cursorRow);
   }
 
@@ -188,6 +190,7 @@ export class Grid {
     const count = Math.min(Math.max(1, n), this.cols - col);
     row.splice(col, count);
     while (row.length < this.cols) row.push(blankCell());
+    this.normalizeRow(row);
     this.markRow(this.cursorRow);
   }
 
@@ -196,7 +199,7 @@ export class Grid {
     const row = this.screen[this.cursorRow]!;
     const col = Math.min(this.cursorCol, this.cols - 1);
     const end = Math.min(this.cols, col + Math.max(1, n));
-    for (let c = col; c < end; c++) row[c] = blankCell();
+    for (let c = col; c < end; c++) this.clearCell(row, c);
     this.markRow(this.cursorRow);
   }
 
@@ -347,21 +350,67 @@ export class Grid {
   }
 
   writeChar(ch: string, attr: CellAttr): void {
+    const width = wcwidth(ch);
+    if (width === 0) {
+      this.appendCombining(ch);
+      return;
+    }
     if (this.pendingWrap) this.wrapToNextLine();
+    if (width === 2 && this.cursorCol === this.cols - 1) {
+      const row = this.screen[this.cursorRow]!;
+      this.clearCell(row, this.cursorCol);
+      this.markRow(this.cursorRow);
+      if (!this.autoWrapMode) return;
+      this.wrapToNextLine();
+    }
     const row = this.screen[this.cursorRow]!;
-    // Share the attr object across adjacent cells. Parser owns attr
-    // lifecycle: it clones on SGR change and hands a stable reference
-    // between changes. Cloning per cell here was burning ~1 allocation
-    // per typed character for zero semantic benefit.
+    this.clearCell(row, this.cursorCol);
     row[this.cursorCol] = { ch, attr };
-    // Inline markRow to avoid call overhead in the hot path. writeChar
-    // is the single most-frequent mutation in any shell session.
+    if (width === 2) {
+      this.clearCell(row, this.cursorCol + 1);
+      row[this.cursorCol + 1] = { ch: '', attr };
+    }
     this.dirtyLines.add(this.scrollback.length + this.cursorRow);
     this.dirty = true;
-    if (this.cursorCol === this.cols - 1) {
+    const next = this.cursorCol + width;
+    if (next >= this.cols) {
+      this.cursorCol = this.cols - 1;
       this.pendingWrap = this.autoWrapMode;
     } else {
-      this.cursorCol += 1;
+      this.cursorCol = next;
+    }
+  }
+
+  private appendCombining(ch: string): void {
+    const row = this.screen[this.cursorRow]!;
+    let col = this.pendingWrap ? this.cols - 1 : this.cursorCol - 1;
+    if (col < 0) return;
+    if (row[col]!.ch === '') col -= 1;
+    if (col < 0 || row[col]!.ch === ' ') return;
+    row[col] = { ...row[col]!, ch: row[col]!.ch + ch };
+    this.markRow(this.cursorRow);
+  }
+
+  private clearCell(row: Cell[], col: number): void {
+    if (col < 0 || col >= this.cols) return;
+    if (row[col]!.ch === '') {
+      row[col] = blankCell();
+      if (col > 0) row[col - 1] = blankCell();
+      return;
+    }
+    if (wcwidth(row[col]!.ch) === 2 && col + 1 < this.cols && row[col + 1]!.ch === '') {
+      row[col + 1] = blankCell();
+    }
+    row[col] = blankCell();
+  }
+
+  private normalizeRow(row: Cell[]): void {
+    for (let col = 0; col < this.cols; col++) {
+      if (row[col]!.ch === '') {
+        if (col === 0 || wcwidth(row[col - 1]!.ch) !== 2) row[col] = blankCell();
+      } else if (wcwidth(row[col]!.ch) === 2) {
+        if (col === this.cols - 1 || row[col + 1]!.ch !== '') row[col] = blankCell();
+      }
     }
   }
 
@@ -451,11 +500,11 @@ export class Grid {
     } else if (mode === 1) {
       for (let r = 0; r < this.cursorRow; r++) this.screen[r] = makeRow(this.cols);
       const row = this.screen[this.cursorRow]!;
-      for (let c = 0; c <= this.cursorCol && c < this.cols; c++) row[c] = blankCell();
+      for (let c = 0; c <= this.cursorCol && c < this.cols; c++) this.clearCell(row, c);
       this.markRange(0, this.cursorRow);
     } else {
       const row = this.screen[this.cursorRow]!;
-      for (let c = this.cursorCol; c < this.cols; c++) row[c] = blankCell();
+      for (let c = this.cursorCol; c < this.cols; c++) this.clearCell(row, c);
       for (let r = this.cursorRow + 1; r < this.rows; r++) this.screen[r] = makeRow(this.cols);
       this.markRange(this.cursorRow, this.rows - 1);
     }
@@ -465,11 +514,11 @@ export class Grid {
     this.clearPendingWrap();
     const row = this.screen[this.cursorRow]!;
     if (mode === 1) {
-      for (let c = 0; c <= this.cursorCol && c < this.cols; c++) row[c] = blankCell();
+      for (let c = 0; c <= this.cursorCol && c < this.cols; c++) this.clearCell(row, c);
     } else if (mode === 2) {
-      for (let c = 0; c < this.cols; c++) row[c] = blankCell();
+      for (let c = 0; c < this.cols; c++) this.clearCell(row, c);
     } else {
-      for (let c = this.cursorCol; c < this.cols; c++) row[c] = blankCell();
+      for (let c = this.cursorCol; c < this.cols; c++) this.clearCell(row, c);
     }
     this.markRow(this.cursorRow);
   }

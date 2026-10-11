@@ -25,6 +25,7 @@ import { prepare, layout } from '@chenglou/pretext';
 import type { CellAttr } from './parser.js';
 import type { Cell } from './grid.js';
 import { Grid } from './grid.js';
+import { wcwidth } from './wcwidth.js';
 import type { PredictionBuffer } from './predict.js';
 
 export interface Theme {
@@ -336,32 +337,37 @@ export class DomRenderer {
   }
 
   private renderLineInto(div: HTMLDivElement, line: Cell[]): void {
-    // Clear. The cursor no longer lives inside line divs, so this rebuild
-    // only concerns text runs.
     div.textContent = '';
-
-    if (line.length === 0) return;
-
-    // Build runs of same-styled cells. Attrs are compared by reference
-    // first (Parser + Grid share a single attr reference across adjacent
-    // cells between SGR changes), so typical shell output hits the fast
-    // path on every cell.
-    let runAttr = line[0]!.attr;
-    let runBuf = line[0]!.ch;
-    for (let i = 1; i < line.length; i++) {
+    let runAttr: CellAttr | null = null;
+    let runBuf = '';
+    const flush = (): void => {
+      if (runAttr && runBuf) this.emitRun(div, runBuf, runAttr);
+      runAttr = null;
+      runBuf = '';
+    };
+    for (let i = 0; i < line.length; i++) {
       const cell = line[i]!;
-      if (attrEq(cell.attr, runAttr)) {
-        runBuf += cell.ch;
-      } else {
-        this.emitRun(div, runBuf, runAttr);
+      if (cell.ch === '') continue;
+      if (wcwidth(cell.ch) === 2 && this.isWideCell(line, i)) {
+        flush();
+        this.emitRun(div, cell.ch, cell.attr, 2);
+        continue;
+      }
+      if (runAttr && attrEq(cell.attr, runAttr)) runBuf += cell.ch;
+      else {
+        flush();
         runAttr = cell.attr;
         runBuf = cell.ch;
       }
     }
-    if (runBuf.length) this.emitRun(div, runBuf, runAttr);
+    flush();
   }
 
-  private emitRun(parent: HTMLDivElement, text: string, attr: CellAttr): void {
+  private isWideCell(line: Cell[], index: number): boolean {
+    return index + 1 < line.length && line[index + 1]!.ch === '';
+  }
+
+  private emitRun(parent: HTMLDivElement, text: string, attr: CellAttr, width = 1): void {
     if (!text.length) return;
     const span = document.createElement('span');
     let fg = attr.fg;
@@ -381,6 +387,10 @@ export class DomRenderer {
     if (attr.bold) span.style.fontWeight = 'bold';
     if (attr.italic) span.style.fontStyle = 'italic';
     if (attr.underline) span.style.textDecoration = 'underline';
+    if (width === 2) {
+      span.style.display = 'inline-block';
+      span.style.width = `${this.charWidth * 2}px`;
+    }
     span.textContent = text;
     parent.appendChild(span);
   }

@@ -48,7 +48,7 @@ term.focus();
 | Parser | ANSI / CSI / OSC state machine |
 | Keyboard | Ported from xterm.js `evaluateKeyboardEvent` |
 | Dependencies | 1 (`@chenglou/pretext`) |
-| Bundle | 21 KB raw, 6.7 KB gz |
+| Bundle | 37,913 bytes raw, 10,938 bytes gzip |
 | License | MIT |
 
 ## How it works
@@ -169,7 +169,10 @@ bun install
 bun test
 bun run typecheck
 bun run build
+bun run size
 ```
+
+`bun run size` enforces the gzip bundle-size budget.
 
 There is also a real-PTY smoke harness:
 

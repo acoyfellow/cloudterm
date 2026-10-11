@@ -1,5 +1,4 @@
 /* cloudterm default styles. Override with CSS vars or scoped selectors. */
-/* KEEP IN SYNC with BASE_CSS in src/index.ts. */
 
 .cloudterm {
   position: relative;

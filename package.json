@@ -38,12 +38,18 @@
     "LICENSE"
   ],
   "scripts": {
+    "prebuild": "tsx scripts/gen-css.ts",
     "build": "tsdown",
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
+    "pretest": "tsx scripts/gen-css.ts",
     "test": "bun test",
+    "size": "tsx scripts/size.ts",
     "bench": "tsx test/bench-paint.ts",
     "smoke": "tsx test/runner.ts"
+  },
+  "sizeBudget": {
+    "dist/index.js": 11008
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.5"

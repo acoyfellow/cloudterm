@@ -7,6 +7,7 @@ import { DomRenderer, defaultTheme, type Theme } from './renderer.js';
 import { InputHandler } from './input.js';
 import { PredictionBuffer } from './predict.js';
 import { wcwidth } from './wcwidth.js';
+import { BASE_CSS } from './base-css.js';
 
 export type { Theme } from './renderer.js';
 
@@ -460,18 +461,3 @@ function ensureBaseStyles(): void {
   s.textContent = BASE_CSS;
   document.head.appendChild(s);
 }
-
-// KEEP IN SYNC with src/style.css.
-const BASE_CSS = `
-.cloudterm{position:relative;width:100%;height:100%;background:var(--ct-bg,#0b0c10);color:var(--ct-fg,#e6e8eb);font-family:var(--ct-font,ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace);font-size:var(--ct-font-size,13px);line-height:1.4;overflow:hidden;cursor:text}
-.cloudterm-viewport{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;contain:strict}
-.cloudterm-sizer{position:relative;width:1px}
-.cloudterm-surface{position:absolute;top:0;left:0;right:0}
-.cloudterm-line{position:absolute;left:0;right:0;white-space:pre;contain:content}
-.cloudterm-line span{white-space:pre}
-.cloudterm-cursor{position:absolute;background:var(--ct-cursor,#7cc4ff);opacity:.4;mix-blend-mode:difference;pointer-events:none;z-index:1}
-.cloudterm-predictions{position:absolute;top:0;left:0;right:0;pointer-events:none}
-.cloudterm-predict{position:absolute;pointer-events:none;font:inherit;color:var(--ct-fg,#e6e8eb);opacity:.85;white-space:pre}
-.cloudterm-input{position:absolute;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;margin:0;resize:none;white-space:pre;overflow:hidden;z-index:0;background:transparent;color:transparent;caret-color:transparent;outline:none}
-.cloudterm:focus-within .cloudterm-cursor{opacity:1}
-`;

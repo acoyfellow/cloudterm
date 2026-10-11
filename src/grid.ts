@@ -33,6 +33,18 @@ export interface Cell {
 
 const DEFAULT_ATTR = Object.freeze(defaultAttr());
 const BLANK = Object.freeze({ ch: ' ', attr: DEFAULT_ATTR });
+const cellCache = new WeakMap<CellAttr, Cell[]>();
+
+function internCell(ch: string, attr: CellAttr): Cell {
+  const code = ch.length === 1 ? ch.charCodeAt(0) : 128;
+  if (code >= 128) return { ch, attr };
+  let cells = cellCache.get(attr);
+  if (!cells) {
+    cells = [];
+    cellCache.set(attr, cells);
+  }
+  return (cells[code] ??= Object.freeze({ ch, attr }));
+}
 
 export function blankCell(): Cell {
   return BLANK;
@@ -366,7 +378,7 @@ export class Grid {
     }
     const row = this.screen[this.cursorRow]!;
     this.clearCell(row, this.cursorCol);
-    row[this.cursorCol] = { ch, attr };
+    row[this.cursorCol] = internCell(ch, attr);
     if (width === 2) {
       this.clearCell(row, this.cursorCol + 1);
       row[this.cursorCol + 1] = { ch: '', attr };

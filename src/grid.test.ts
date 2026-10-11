@@ -625,3 +625,20 @@ describe('Grid scroll region and line editing', () => {
     expect(text(g)).toEqual(['', 'a', 'b']);
   });
 });
+
+describe('Grid cell interning', () => {
+  test('repeated ascii cells with one attr share a frozen cell', () => {
+    const grid = new Grid(4, 1);
+    const attr = defaultAttr();
+    grid.writeChar('a', attr);
+    grid.writeChar('a', attr);
+    grid.writeChar('b', attr);
+    const row = grid.screen[0]!;
+    expect(row[0]).toBe(row[1]);
+    expect(row[0]).not.toBe(row[2]);
+    expect(Object.isFrozen(row[0])).toBe(true);
+    grid.writeChar('\u0301', attr);
+    expect(row[2]!.ch).toBe('b\u0301');
+    expect(row[0]!.ch).toBe('a');
+  });
+});

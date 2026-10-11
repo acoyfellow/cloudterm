@@ -670,6 +670,12 @@ export class Grid {
         text += cell.ch === '' ? '\u0000' : cell.ch;
       }
       if (text) runs.push([text, index]);
+      const tail = runs[runs.length - 1];
+      if (tail && JSON.stringify(attrs[tail[1]]) === JSON.stringify(DEFAULT_ATTR)) {
+        const trimmed = tail[0].replace(/ +$/, '');
+        if (trimmed) tail[0] = trimmed;
+        else runs.pop();
+      }
       return runs;
     };
     const lines: SerializedLine[] = [];
@@ -700,14 +706,17 @@ export class Grid {
     };
     const validMouseTracking = (value: unknown): value is 0 | 9 | 1000 | 1002 | 1003 => value === 0 || value === 9 || value === 1000 || value === 1002 || value === 1003;
     if (!snapshot || snapshot.v !== 1 || !Number.isInteger(snapshot.cols) || snapshot.cols < 1 || !Number.isInteger(snapshot.rows) || snapshot.rows < 1 || !Array.isArray(snapshot.cursor) || snapshot.cursor.length !== 2 || !snapshot.cursor.every(Number.isInteger) || !snapshot.modes || typeof snapshot.modes !== 'object' || typeof snapshot.modes.applicationCursor !== 'boolean' || typeof snapshot.modes.bracketedPaste !== 'boolean' || typeof snapshot.modes.autowrap !== 'boolean' || !validMouseTracking(snapshot.modes.mouseTracking) || typeof snapshot.modes.mouseSgr !== 'boolean' || !Array.isArray(snapshot.attrs) || !snapshot.attrs.every(validAttr) || !Array.isArray(snapshot.lines) || !Array.isArray(snapshot.scrollback) || !snapshot.scrollback.every(Number.isInteger) || !Array.isArray(snapshot.screen) || !snapshot.screen.every(Number.isInteger) || !Number.isInteger(snapshot.trimmed) || snapshot.trimmed < 0) throw new Error('Invalid terminal snapshot');
+    const sharedAttrs = snapshot.attrs.map((attr) => JSON.stringify(attr) === JSON.stringify(DEFAULT_ATTR) ? DEFAULT_ATTR : Object.freeze({ ...attr }));
     const decode = (runs: SerializedLine): Cell[] => {
       if (!Array.isArray(runs)) throw new Error('Invalid terminal snapshot');
       const cells: Cell[] = [];
       for (const run of runs) {
-        if (!Array.isArray(run) || run.length !== 2 || typeof run[0] !== 'string' || !Number.isInteger(run[1]) || !snapshot.attrs[run[1]]) throw new Error('Invalid terminal snapshot');
-        for (const ch of run[0]) cells.push({ ch: ch === '\u0000' ? '' : ch, attr: { ...snapshot.attrs[run[1]]! } });
+        if (!Array.isArray(run) || run.length !== 2 || typeof run[0] !== 'string' || !Number.isInteger(run[1]) || !sharedAttrs[run[1]]) throw new Error('Invalid terminal snapshot');
+        const attr = sharedAttrs[run[1]]!;
+        for (const ch of run[0]) cells.push(ch === '\u0000' ? { ch: '', attr } : internCell(ch, attr));
       }
-      if (cells.length !== snapshot.cols) throw new Error('Invalid terminal snapshot');
+      if (cells.length > snapshot.cols) throw new Error('Invalid terminal snapshot');
+      while (cells.length < snapshot.cols) cells.push(BLANK);
       return cells;
     };
     const lines = snapshot.lines.map(decode);

@@ -491,10 +491,7 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   let searchKey = '';
   const showMatch = (match: SearchMatch | null): SearchMatch | null => {
     renderer.setSearchMatch(match);
-    if (match) {
-      renderer.viewport.scrollTop = Math.max(0, (match.line - grid.trimmed) * renderer.lineHeight);
-      renderer.paint();
-    }
+    if (match) renderer.scrollToLine(match.line);
     return match;
   };
 

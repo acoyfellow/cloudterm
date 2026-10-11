@@ -312,7 +312,7 @@ export class DomRenderer {
   private positionSearchMatch(): void {
     const match = this.searchMatch;
     if (!match) { this.searchEl.style.display = 'none'; return; }
-    this.searchEl.style.display = '';
+    this.searchEl.style.display = 'block';
     this.searchEl.style.top = `${(match.line - this.grid.trimmed) * this.lineHeight}px`;
     this.searchEl.style.left = `${match.col * this.charWidth}px`;
     this.searchEl.style.width = `${match.length * this.charWidth}px`;
@@ -456,6 +456,16 @@ export class DomRenderer {
       element.removeAttribute('rel');
     }
     if (element.textContent !== text) element.textContent = text;
+  }
+
+  scrollToLine(line: number): void {
+    const vp = this.viewport;
+    const top = (line - this.grid.trimmed) * this.lineHeight;
+    const target = Math.max(0, top - Math.max(0, vp.clientHeight - this.lineHeight) / 2);
+    const bottom = Math.max(0, vp.scrollHeight - vp.clientHeight);
+    this.stickBottom = target >= bottom;
+    vp.scrollTop = Math.min(target, bottom);
+    this.paint();
   }
 
   scrollToBottom(): void {

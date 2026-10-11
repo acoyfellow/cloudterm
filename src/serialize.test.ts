@@ -77,4 +77,20 @@ describe('Grid serialize and restore', () => {
     }
     expect(new TextEncoder().encode(grid.serialize()).byteLength).toBeLessThan(300 * 1024);
   });
+
+  test('drops trailing default blanks so unique lines stay small', () => {
+    const source = createHeadless(92, 4, { maxScrollback: 10_000 });
+    let text = '';
+    for (let i = 0; i < 10_000; i++) text += `line ${i} \x1b[36mstamp\x1b[0m\r\n`;
+    source.feedString(text);
+    const snapshot = source.serialize();
+    expect(snapshot.length).toBeLessThan(400_000);
+    const target = createHeadless(92, 4, { maxScrollback: 10_000 });
+    target.restore(snapshot);
+    expect(target.serialize()).toBe(snapshot);
+    const last = target.grid.getLine(target.grid.trimmed + target.grid.scrollback.length - 1);
+    expect(last.length).toBe(92);
+    expect(last.map((cell) => cell.ch).join('').trimEnd()).toBe('line 9996 stamp');
+  });
 });
+

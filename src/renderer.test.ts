@@ -132,12 +132,29 @@ describe('DomRenderer', () => {
     renderer.paint();
     renderer.setSearchMatch({ line: 0, col: 4, length: 8 });
     const highlight = renderer.surface.querySelector('.cloudterm-search-match') as HTMLSpanElement;
-    expect(highlight.style.display).toBe('');
+    expect(highlight.style.display).toBe('block');
     expect(highlight.style.left).toBe('32px');
     expect(highlight.style.top).toBe('0px');
     expect(highlight.style.width).toBe('64px');
     expect(highlight.style.height).toBe('16px');
     renderer.setSearchMatch(null);
     expect(highlight.style.display).toBe('none');
+  });
+
+  test('scrollToLine leaves stick-to-bottom so the match stays in view', () => {
+    const { renderer, grid } = createRenderer(12, 4);
+    for (let i = 0; i < 100; i++) {
+      grid.writeAscii(`row ${i}`, defaultAttr());
+      grid.carriageReturn();
+      grid.lineFeed();
+    }
+    let scrollTop = 0;
+    Object.defineProperty(renderer.viewport, 'scrollHeight', { configurable: true, get: () => grid.totalLines() * 16 });
+    Object.defineProperty(renderer.viewport, 'scrollTop', { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value; } });
+    renderer.paint();
+    expect(scrollTop).toBe(grid.totalLines() * 16 - 64);
+    renderer.scrollToLine(grid.trimmed + 10);
+    renderer.paint();
+    expect(scrollTop).toBe(10 * 16 - 24);
   });
 });

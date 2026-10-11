@@ -17,3 +17,12 @@ describe('wcwidth', () => {
     expect(wcwidth('\u{1f600}')).toBe(2);
   });
 });
+
+describe('wcwidth coverage', () => {
+  test('treats scripts with combining marks as zero width', () => {
+    expect(wcwidth('\u0915\u094d'.slice(1))).toBe(0);
+    expect(wcwidth('\u0e31')).toBe(0);
+    expect(wcwidth('\u20dd')).toBe(0);
+    expect(wcwidth('\u{1f3fb}')).toBe(2);
+  });
+});

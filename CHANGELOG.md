@@ -4,6 +4,11 @@ All notable changes to cloudterm will be documented here.
 
 ## Unreleased
 
+## 0.0.13
+
+- Mounting or focusing a terminal no longer scrolls the page to it (`focus({ preventScroll: true })`).
+- DOM renderer writes each span's style in one attribute instead of up to seven property calls.
+
 ## 0.0.12
 
 - Faster parser and grid: printable ASCII is written a row segment at a time, single-code SGR changes are cached, rows evicted from a full scrollback are reused, and mount skips a frame when fonts are loaded and the host has a size. Against 0.0.11 (bench-compare, 5 rounds): sgr-tokens -49%, scroll-flood -52%, full-redraw -66%.

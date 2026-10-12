@@ -145,7 +145,7 @@ export class InputHandler {
   }
 
   focus(): void {
-    this.ta.focus();
+    this.ta.focus({ preventScroll: true });
   }
 
   private onKeydown(e: KeyboardEvent): void {

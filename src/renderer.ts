@@ -433,18 +433,8 @@ export class DomRenderer {
     }
     const fgColor = colorOf(fg, 'var(--ct-fg)');
     const bgColor = colorOf(bg, attr.reverse ? 'var(--ct-fg)' : 'transparent');
-    const styleValues: Array<[string, string]> = [
-      ['color', fgColor === 'var(--ct-fg)' ? '' : fgColor],
-      ['background', bgColor === 'transparent' ? '' : bgColor],
-      ['font-weight', attr.bold ? 'bold' : ''],
-      ['font-style', attr.italic ? 'italic' : ''],
-      ['text-decoration', attr.underline ? 'underline' : ''],
-      ['display', width === 2 ? 'inline-block' : ''],
-      ['width', width === 2 ? `${this.charWidth * 2}px` : ''],
-    ];
-    for (const [property, value] of styleValues) {
-      if (element.style.getPropertyValue(property) !== value) element.style.setProperty(property, value);
-    }
+    const style = `color:${fgColor === 'var(--ct-fg)' ? '' : fgColor};background:${bgColor === 'transparent' ? '' : bgColor};font-weight:${attr.bold ? 'bold' : ''};font-style:${attr.italic ? 'italic' : ''};text-decoration:${attr.underline ? 'underline' : ''};${width === 2 ? `display:inline-block;width:${this.charWidth * 2}px;` : ''}`;
+    if (element.getAttribute('style') !== style) element.setAttribute('style', style);
     if (link) {
       element.className = 'cloudterm-link';
       element.setAttribute('href', link);

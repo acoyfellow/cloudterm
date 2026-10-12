@@ -1,5 +1,4 @@
 /* cloudterm default styles. Override with CSS vars or scoped selectors. */
-/* KEEP IN SYNC with BASE_CSS in src/index.ts. */
 
 .cloudterm {
   position: relative;
@@ -46,6 +45,12 @@
   white-space: pre;
 }
 
+.cloudterm-link {
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* The cursor is a single long-lived element at the surface root, not a
    child of any line div. z-index lifts it above line text so the blend
    mode mixes with the rendered glyphs beneath it. */
@@ -62,6 +67,15 @@
    rendered on top of the authoritative grid while the client waits for the
    server's echo. Reduced opacity makes them read as provisional without
    shouting. Rebuilt every paint; kept free of layout-affecting styles. */
+.cloudterm-search-match {
+  position: absolute;
+  display: none;
+  background: #f6c945;
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .cloudterm-predictions {
   position: absolute;
   top: 0;

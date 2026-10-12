@@ -39,7 +39,7 @@
   ],
   "scripts": {
     "prebuild": "tsx scripts/gen-css.ts",
-    "build": "tsdown",
+    "build": "tsdown && bun scripts/strip-dts-regions.ts",
     "dev": "tsdown --watch",
     "dev:demo": "bun --hot scripts/dev.ts",
     "demo:check": "bun scripts/demo-check.ts",

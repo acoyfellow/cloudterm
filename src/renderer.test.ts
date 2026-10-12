@@ -78,6 +78,19 @@ describe('DomRenderer', () => {
     expect((renderer as unknown as { linePool: HTMLDivElement[] }).linePool).toHaveLength(0);
   });
 
+  test('keeps a screen of rows rendered above and below the viewport by default', () => {
+    const { renderer, grid } = createRenderer(4, 10);
+    grid.cursorRow = 9;
+    for (let i = 0; i < 60; i++) grid.lineFeed();
+    (renderer as unknown as { stickBottom: boolean }).stickBottom = false;
+    const firstVisible = 30;
+    renderer.viewport.scrollTop = firstVisible * renderer.lineHeight;
+    renderer.paint();
+    const rendered = [...(renderer as unknown as { rendered: Map<number, HTMLDivElement> }).rendered.keys()];
+    expect(Math.min(...rendered)).toBeLessThanOrEqual(grid.trimmed + firstVisible - grid.rows);
+    expect(Math.max(...rendered)).toBeGreaterThanOrEqual(grid.trimmed + firstVisible + grid.rows * 2 - 1);
+  });
+
   test('matches the previous palette and truecolor output', () => {
     const { renderer } = createRenderer();
     const emitRun = (renderer as unknown as { emitRun(span: HTMLSpanElement, text: string, attr: ReturnType<typeof defaultAttr>): void }).emitRun.bind(renderer);

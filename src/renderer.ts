@@ -135,7 +135,7 @@ export class DomRenderer {
   // Virtualization: track rendered line indexes -> their divs.
   private rendered = new Map<number, HTMLDivElement>();
   private linePool: HTMLDivElement[] = [];
-  private overscan = 4;
+  private overscan: number | null = null;
   private hadPredictions = false;
 
   // Optional speculative-echo overlay. When set, paint() rebuilds the overlay
@@ -248,10 +248,11 @@ export class DomRenderer {
     const scrollTop = vp.scrollTop;
     const vpHeight = vp.clientHeight || this.grid.rows * this.lineHeight;
 
-    const first = this.grid.trimmed + Math.max(0, Math.floor(scrollTop / this.lineHeight) - this.overscan);
+    const overscan = this.overscan ?? this.grid.rows;
+    const first = this.grid.trimmed + Math.max(0, Math.floor(scrollTop / this.lineHeight) - overscan);
     const last = this.grid.trimmed + Math.min(
       total - 1,
-      Math.ceil((scrollTop + vpHeight) / this.lineHeight) + this.overscan,
+      Math.ceil((scrollTop + vpHeight) / this.lineHeight) + overscan,
     );
 
     // Consume dirty state once per paint. After this call, the grid has no
@@ -264,7 +265,7 @@ export class DomRenderer {
       if (idx < first || idx > last) {
         el.remove();
         this.rendered.delete(idx);
-        if (this.linePool.length < this.grid.rows * 2) this.linePool.push(el);
+        if (this.linePool.length < this.grid.rows * 4) this.linePool.push(el);
       }
     }
 

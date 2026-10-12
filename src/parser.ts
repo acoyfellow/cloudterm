@@ -30,6 +30,39 @@ function canonicalAttr(attr: CellAttr): CellAttr {
   return canonical;
 }
 
+const quickSgrCache = new Map<CellAttr, (CellAttr | undefined)[]>();
+
+function applySimpleSgr(next: CellAttr, code: number): boolean {
+  if (code === 0) Object.assign(next, defaultAttr());
+  else if (code === 1 || code === 22) next.bold = code === 1;
+  else if (code === 3 || code === 23) next.italic = code === 3;
+  else if (code === 4 || code === 24) next.underline = code === 4;
+  else if (code === 7 || code === 27) next.reverse = code === 7;
+  else if (code >= 30 && code <= 37) next.fg = code - 30;
+  else if (code === 39) next.fg = -1;
+  else if (code >= 40 && code <= 47) next.bg = code - 40;
+  else if (code === 49) next.bg = -1;
+  else if (code >= 90 && code <= 97) next.fg = code - 82;
+  else if (code >= 100 && code <= 107) next.bg = code - 92;
+  else return false;
+  return true;
+}
+
+function quickSgr(current: CellAttr, code: number): CellAttr | null {
+  if (code < 0 || code > 107) return null;
+  let row = quickSgrCache.get(current);
+  if (!row) {
+    if (quickSgrCache.size >= 4096) quickSgrCache.clear();
+    row = [];
+    quickSgrCache.set(current, row);
+  }
+  const cached = row[code];
+  if (cached) return cached;
+  const next: CellAttr = { ...current };
+  if (!applySimpleSgr(next, code)) return null;
+  return (row[code] = canonicalAttr(next));
+}
+
 export interface ParserSink {
   print(ch: string): void;
   printRun?(text: string): void;
@@ -572,64 +605,29 @@ export class AnsiParser {
     }
     // Start from a copy of the current attr so incremental flags accumulate
     // correctly across this single SGR sequence.
+    if (ps.length === 1 && this.attr.link === undefined) {
+      const quick = quickSgr(this.attr, ps[0]!);
+      if (quick) {
+        this.attr = quick;
+        this.sink.setAttr(quick);
+        return;
+      }
+    }
     const next: CellAttr = { ...this.attr };
     for (let i = 0; i < ps.length; i++) {
-      let n = ps[i]!;
-      if (n < 0) n = 0;
-      if (n === 0) {
-        Object.assign(next, defaultAttr());
-      } else if (n === 1) {
-        next.bold = true;
-      } else if (n === 3) {
-        next.italic = true;
-      } else if (n === 4) {
-        next.underline = true;
-      } else if (n === 7) {
-        next.reverse = true;
-      } else if (n === 22) {
-        next.bold = false;
-      } else if (n === 23) {
-        next.italic = false;
-      } else if (n === 24) {
-        next.underline = false;
-      } else if (n === 27) {
-        next.reverse = false;
-      } else if (n >= 30 && n <= 37) {
-        next.fg = n - 30;
-      } else if (n === 38) {
-        const nx = ps[i + 1];
-        if (nx === 5 && ps[i + 2] !== undefined) {
-          next.fg = ps[i + 2]!;
-          i += 2;
-        } else if (nx === 2 && ps[i + 4] !== undefined) {
-          const r = ps[i + 2]! & 0xff;
-          const g = ps[i + 3]! & 0xff;
-          const b = ps[i + 4]! & 0xff;
-          next.fg = 0x01000000 | (r << 16) | (g << 8) | b;
-          i += 4;
-        }
-      } else if (n === 39) {
-        next.fg = -1;
-      } else if (n >= 40 && n <= 47) {
-        next.bg = n - 40;
-      } else if (n === 48) {
-        const nx = ps[i + 1];
-        if (nx === 5 && ps[i + 2] !== undefined) {
-          next.bg = ps[i + 2]!;
-          i += 2;
-        } else if (nx === 2 && ps[i + 4] !== undefined) {
-          const r = ps[i + 2]! & 0xff;
-          const g = ps[i + 3]! & 0xff;
-          const b = ps[i + 4]! & 0xff;
-          next.bg = 0x01000000 | (r << 16) | (g << 8) | b;
-          i += 4;
-        }
-      } else if (n === 49) {
-        next.bg = -1;
-      } else if (n >= 90 && n <= 97) {
-        next.fg = n - 90 + 8;
-      } else if (n >= 100 && n <= 107) {
-        next.bg = n - 100 + 8;
+      const n = Math.max(0, ps[i]!);
+      if (n !== 38 && n !== 48) {
+        applySimpleSgr(next, n);
+        continue;
+      }
+      const key = n === 38 ? 'fg' : 'bg';
+      const mode = ps[i + 1];
+      if (mode === 5 && ps[i + 2] !== undefined) {
+        next[key] = ps[i + 2]!;
+        i += 2;
+      } else if (mode === 2 && ps[i + 4] !== undefined) {
+        next[key] = 0x01000000 | ((ps[i + 2]! & 0xff) << 16) | ((ps[i + 3]! & 0xff) << 8) | (ps[i + 4]! & 0xff);
+        i += 4;
       }
     }
     this.attr = canonicalAttr(next);

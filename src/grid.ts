@@ -45,6 +45,26 @@ function internCell(ch: string, attr: CellAttr): Cell {
   return (cells[code] ??= Object.freeze({ ch, attr }));
 }
 
+let lastAttr: CellAttr | null = null;
+let lastCells: Cell[] = [];
+
+function asciiCells(attr: CellAttr): Cell[] {
+  if (attr === lastAttr) return lastCells;
+  let cells = cellCache.get(attr);
+  if (!cells) {
+    cells = [];
+    cellCache.set(attr, cells);
+  }
+  lastAttr = attr;
+  lastCells = cells;
+  return cells;
+}
+
+function isWideAt(row: Cell[], col: number): boolean {
+  const ch = row[col]!.ch;
+  return ch.length > 0 && ch.charCodeAt(0) > 127 && wcwidth(ch) === 2;
+}
+
 export function blankCell(): Cell {
   return BLANK;
 }
@@ -91,14 +111,18 @@ export class RingBuffer<T> {
     this.values = new Array<T | undefined>(capacity);
   }
 
+  evicted: T | undefined;
+
   push(value: T): boolean {
+    this.evicted = undefined;
     if (this.capacity === 0) return false;
-    const overwrote = this.length === this.capacity;
+    const full = this.length === this.capacity;
     const index = (this.start + this.length) % this.capacity;
+    if (full) this.evicted = this.values[index];
     this.values[index] = value;
-    if (overwrote) this.start = (this.start + 1) % this.capacity;
+    if (full) this.start = (this.start + 1) % this.capacity;
     else this.length += 1;
-    return overwrote;
+    return full;
   }
 
   get(index: number): T | undefined {
@@ -386,12 +410,16 @@ export class Grid {
     }
   }
 
-  private pushScrollback(row: Cell[]): void {
-    // Alt-screen content never enters scrollback. Application-level scrolling
-    // inside less, vim, tmux, etc. must not leak into the user's history.
-    if (this.inAltScreen) return;
-    if (this.maxScrollback === 0) return;
-    if (this.scrollback.push(row)) this.trimmed += 1;
+  private freshRow(gone: Cell[] | undefined): Cell[] {
+    const recycled = gone && this.pushScrollback(gone);
+    return recycled?.length === this.cols ? recycled.fill(BLANK) : makeRow(this.cols);
+  }
+
+  private pushScrollback(row: Cell[]): Cell[] | undefined {
+    if (this.inAltScreen || this.maxScrollback === 0) return undefined;
+    if (!this.scrollback.push(row)) return undefined;
+    this.trimmed += 1;
+    return this.scrollback.evicted;
   }
 
   private clearPendingWrap(): void {
@@ -424,24 +452,26 @@ export class Grid {
   }
 
   writeAscii(text: string, attr: CellAttr): void {
-    let dirtyLine = -1;
-    for (let index = 0; index < text.length; index++) {
+    const cells = asciiCells(attr);
+    let index = 0;
+    while (index < text.length) {
       if (this.pendingWrap) this.wrapToNextLine();
       const row = this.screen[this.cursorRow]!;
-      const existing = row[this.cursorCol]!;
-      if (existing.ch === '' || (existing.ch.charCodeAt(0) > 127 && wcwidth(existing.ch) === 2)) {
-        this.clearCell(row, this.cursorCol);
+      const start = this.cursorCol;
+      const end = Math.min(this.cols, start + text.length - index);
+      if (row[start]!.ch === '' || isWideAt(row, start)) this.clearCell(row, start);
+      if (end < this.cols && row[end]!.ch === '') row[end] = BLANK;
+      for (let col = start; col < end; col++, index++) {
+        row[col] = cells[text.charCodeAt(index)] ??= Object.freeze({ ch: text[index]!, attr });
       }
-      row[this.cursorCol] = internCell(text[index]!, attr);
-      const line = this.absOf(this.cursorRow);
-      if (line !== dirtyLine) {
-        this.markRow(this.cursorRow);
-        dirtyLine = line;
-      }
-      if (this.cursorCol === this.cols - 1) {
+      this.markRow(this.cursorRow);
+      this.cursorCol = Math.min(end, this.cols - 1);
+      if (end === this.cols) {
         this.pendingWrap = this.autoWrapMode;
-      } else {
-        this.cursorCol += 1;
+        if (!this.autoWrapMode && index < text.length) {
+          row[end - 1] = cells[text.charCodeAt(text.length - 1)] ??= Object.freeze({ ch: text[text.length - 1]!, attr });
+          return;
+        }
       }
     }
   }
@@ -541,8 +571,7 @@ export class Grid {
       // but their absolute indexes are stable. The new bottom row is
       // fresh content and the cursor is now on it.
       const gone = this.screen.shift();
-      if (gone) this.pushScrollback(gone);
-      this.screen.push(makeRow(this.cols));
+      this.screen.push(this.freshRow(gone));
       // New bottom row's absolute index is the one the cursor is on now.
       this.dirtyRows.copyWithin(0, 1);
       this.dirtyRows[this.rows - 1] = 0;
@@ -630,8 +659,7 @@ export class Grid {
     }
     for (let i = 0; i < n; i++) {
       const gone = this.screen.shift();
-      if (gone) this.pushScrollback(gone);
-      this.screen.push(makeRow(this.cols));
+      this.screen.push(this.freshRow(gone));
     }
     // All visible rows' content shifted but absolute indexes are stable;
     // content at each visible absolute index changed, so mark them all.

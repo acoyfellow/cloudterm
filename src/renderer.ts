@@ -63,14 +63,10 @@ function xterm256Color(n: number): string {
     return rgbHex(v, v, v);
   }
   const i = n - 16;
-  const r = Math.floor(i / 36);
-  const g = Math.floor((i % 36) / 6);
-  const b = i % 6;
   const map = [0, 95, 135, 175, 215, 255];
-  return rgbHex(map[r]!, map[g]!, map[b]!);
+  return rgbHex(map[i / 36 | 0]!, map[i % 36 / 6 | 0]!, map[i % 6]!);
 }
 
-const PALETTE_256 = Array.from({ length: 256 }, (_, index) => xterm256Color(index));
 const truecolorCache = new Map<number, string>();
 
 function colorOf(n: number, fallback: string): string {
@@ -83,7 +79,7 @@ function colorOf(n: number, fallback: string): string {
     truecolorCache.set(n, color);
     return color;
   }
-  if (n < 256) return PALETTE_256[n]!;
+  if (n < 256) return xterm256Color(n);
   return fallback;
 }
 
@@ -112,6 +108,14 @@ function safeLink(value: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function isTransparentBlank({ ch, attr }: Cell): boolean {
+  return (!ch || ch === ' ') && attr.bg < 0 && !attr.reverse && !attr.underline && !attr.link;
+}
+
+function isWideCell(line: Cell[], index: number): boolean {
+  return index + 1 < line.length && line[index + 1]!.ch === '';
 }
 
 export class DomRenderer {
@@ -381,6 +385,8 @@ export class DomRenderer {
 
   private renderLineInto(div: HTMLDivElement, line: Cell[]): void {
     const runs: Array<{ text: string; attr: CellAttr; width: number }> = [];
+    let end = line.length;
+    while (end > 0 && isTransparentBlank(line[end - 1]!)) end--;
     let runAttr: CellAttr | null = null;
     let runBuf = '';
     const flush = (): void => {
@@ -388,10 +394,10 @@ export class DomRenderer {
       runAttr = null;
       runBuf = '';
     };
-    for (let i = 0; i < line.length; i++) {
+    for (let i = 0; i < end; i++) {
       const cell = line[i]!;
       if (cell.ch === '') continue;
-      if (wcwidth(cell.ch) === 2 && this.isWideCell(line, i)) {
+      if (wcwidth(cell.ch) === 2 && isWideCell(line, i)) {
         flush();
         runs.push({ text: cell.ch, attr: cell.attr, width: 2 });
         continue;
@@ -415,10 +421,6 @@ export class DomRenderer {
       if (!element.parentElement) div.appendChild(element);
     }
     while (div.children.length > runs.length) div.lastElementChild!.remove();
-  }
-
-  private isWideCell(line: Cell[], index: number): boolean {
-    return index + 1 < line.length && line[index + 1]!.ch === '';
   }
 
   private emitRun(element: HTMLElement, text: string, attr: CellAttr, width = 1, link = safeLink(attr.link)): void {

@@ -47,7 +47,39 @@ describe('DomRenderer', () => {
     renderer.paint();
     const updated = renderer.surface.querySelector('.cloudterm-line span')!;
     expect(updated).toBe(span);
-    expect(updated.textContent).toBe('b   ');
+    expect(updated.textContent).toBe('b');
+  });
+
+  test('trims default trailing blanks', () => {
+    const { renderer, grid } = createRenderer();
+    grid.writeAscii('abc', defaultAttr());
+    renderer.paint();
+    expect(renderer.surface.querySelector('.cloudterm-line')!.textContent).toBe('abc');
+  });
+
+  test('keeps trailing blanks with a background color', () => {
+    const { renderer, grid } = createRenderer();
+    grid.writeAscii('a', defaultAttr());
+    grid.writeAscii('   ', { ...defaultAttr(), bg: 1 });
+    renderer.paint();
+    expect(renderer.surface.querySelector('.cloudterm-line')!.textContent).toBe('a   ');
+  });
+
+  test('keeps trailing blanks in reverse video', () => {
+    const { renderer, grid } = createRenderer();
+    grid.writeAscii('a', defaultAttr());
+    grid.writeAscii('   ', { ...defaultAttr(), reverse: true });
+    renderer.paint();
+    expect(renderer.surface.querySelector('.cloudterm-line')!.textContent).toBe('a   ');
+  });
+
+  test('keeps blank line divs without text', () => {
+    const { renderer } = createRenderer();
+    renderer.paint();
+    const line = renderer.surface.querySelector('.cloudterm-line')!;
+    expect(line.textContent).toBe('');
+    expect(line.children).toHaveLength(0);
+    expect(line.style.height).toBe('16px');
   });
 
   test('clears styles on a reused span', () => {
@@ -111,10 +143,9 @@ describe('DomRenderer', () => {
     grid.writeChar('界', defaultAttr());
     renderer.paint();
     const spans = renderer.surface.querySelectorAll('.cloudterm-line span');
-    expect(spans).toHaveLength(2);
+    expect(spans).toHaveLength(1);
     expect(spans[0]!.textContent).toBe('界');
     expect(spans[0]!.style.width).toBe('16px');
-    expect(spans[1]!.textContent).toBe('  ');
   });
 
   test('renders linked runs as safe anchors and replaces them with spans', () => {

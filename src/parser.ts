@@ -49,18 +49,14 @@ function applySimpleSgr(next: CellAttr, code: number): boolean {
 }
 
 function quickSgr(current: CellAttr, code: number): CellAttr | null {
-  if (code < 0 || code > 107) return null;
   let row = quickSgrCache.get(current);
   if (!row) {
     if (quickSgrCache.size >= 4096) quickSgrCache.clear();
-    row = [];
-    quickSgrCache.set(current, row);
+    quickSgrCache.set(current, (row = []));
   }
-  const cached = row[code];
-  if (cached) return cached;
+  if (row[code]) return row[code];
   const next: CellAttr = { ...current };
-  if (!applySimpleSgr(next, code)) return null;
-  return (row[code] = canonicalAttr(next));
+  return applySimpleSgr(next, code) ? (row[code] = canonicalAttr(next)) : null;
 }
 
 export interface ParserSink {
@@ -598,20 +594,10 @@ export class AnsiParser {
     // once handed to the sink. Mutating would retroactively repaint
     // cells written under the previous attr.
     const ps = this.params;
-    if (ps.length === 0 || (ps.length === 1 && ps[0]! < 0)) {
-      this.attr = DEFAULT_ATTR;
-      this.sink.setAttr(this.attr);
+    const quick = ps.length === 1 && (ps[0]! < 0 ? DEFAULT_ATTR : this.attr.link === undefined && quickSgr(this.attr, ps[0]!));
+    if (quick) {
+      this.sink.setAttr((this.attr = quick));
       return;
-    }
-    // Start from a copy of the current attr so incremental flags accumulate
-    // correctly across this single SGR sequence.
-    if (ps.length === 1 && this.attr.link === undefined) {
-      const quick = quickSgr(this.attr, ps[0]!);
-      if (quick) {
-        this.attr = quick;
-        this.sink.setAttr(quick);
-        return;
-      }
     }
     const next: CellAttr = { ...this.attr };
     for (let i = 0; i < ps.length; i++) {
@@ -630,7 +616,6 @@ export class AnsiParser {
         i += 4;
       }
     }
-    this.attr = canonicalAttr(next);
-    this.sink.setAttr(this.attr);
+    this.sink.setAttr((this.attr = canonicalAttr(next)));
   }
 }

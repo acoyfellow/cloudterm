@@ -36,13 +36,7 @@ const cellCache = new WeakMap<CellAttr, Cell[]>();
 
 function internCell(ch: string, attr: CellAttr): Cell {
   const code = ch.length === 1 ? ch.charCodeAt(0) : 128;
-  if (code >= 128) return { ch, attr };
-  let cells = cellCache.get(attr);
-  if (!cells) {
-    cells = [];
-    cellCache.set(attr, cells);
-  }
-  return (cells[code] ??= Object.freeze({ ch, attr }));
+  return code < 128 ? (asciiCells(attr)[code] ??= Object.freeze({ ch, attr })) : { ch, attr };
 }
 
 let lastAttr: CellAttr | null = null;
@@ -61,8 +55,7 @@ function asciiCells(attr: CellAttr): Cell[] {
 }
 
 function isWideAt(row: Cell[], col: number): boolean {
-  const ch = row[col]!.ch;
-  return ch.length > 0 && ch.charCodeAt(0) > 127 && wcwidth(ch) === 2;
+  return row[col]!.ch > '~' && wcwidth(row[col]!.ch) === 2;
 }
 
 export function blankCell(): Cell {
@@ -316,9 +309,7 @@ export class Grid {
   }
 
   private markRange(rStart: number, rEnd: number): void {
-    const a = Math.max(0, rStart);
-    const b = Math.min(this.rows - 1, rEnd);
-    for (let r = a; r <= b; r++) this.markRow(r);
+    for (let r = Math.max(0, rStart); r <= rEnd; r++) this.markRow(r);
   }
 
   private pruneDirty(): void {
@@ -430,15 +421,10 @@ export class Grid {
   setCursor(row: number, col: number): void {
     const nr = Math.min(this.rows - 1, Math.max(0, row));
     const nc = Math.min(this.cols - 1, Math.max(0, col));
-    this.clearPendingWrap();
-    // Skip the move entirely if the cursor is already there. Apps often
-    // re-send CUP on every redraw and most of them are no-ops.
-    if (nr === this.cursorRow && nc === this.cursorCol) return;
-    this.withCursorMove(() => {
-      this.cursorRow = nr;
-      this.cursorCol = nc;
-    });
+    if (nr === this.cursorRow && nc === this.cursorCol) this.clearPendingWrap();
+    else this.setCursorForced(nr, nc);
   }
+
 
   saveCursor(): void {
     this.savedRow = this.cursorRow;
@@ -462,14 +448,14 @@ export class Grid {
       if (row[start]!.ch === '' || isWideAt(row, start)) this.clearCell(row, start);
       if (end < this.cols && row[end]!.ch === '') row[end] = BLANK;
       for (let col = start; col < end; col++, index++) {
-        row[col] = cells[text.charCodeAt(index)] ??= Object.freeze({ ch: text[index]!, attr });
+        row[col] = cells[text.charCodeAt(index)] ??= internCell(text[index]!, attr);
       }
       this.markRow(this.cursorRow);
       this.cursorCol = Math.min(end, this.cols - 1);
       if (end === this.cols) {
         this.pendingWrap = this.autoWrapMode;
         if (!this.autoWrapMode && index < text.length) {
-          row[end - 1] = cells[text.charCodeAt(text.length - 1)] ??= Object.freeze({ ch: text[text.length - 1]!, attr });
+          row[end - 1] = internCell(text[text.length - 1]!, attr);
           return;
         }
       }
@@ -599,24 +585,16 @@ export class Grid {
   }
 
   cursorUp(n: number): void {
-    this.withCursorMove(() => {
-      this.cursorRow = Math.max(0, this.cursorRow - Math.max(1, n));
-    });
+    this.setCursorForced(this.cursorRow - Math.max(1, n), this.cursorCol);
   }
   cursorDown(n: number): void {
-    this.withCursorMove(() => {
-      this.cursorRow = Math.min(this.rows - 1, this.cursorRow + Math.max(1, n));
-    });
+    this.setCursorForced(this.cursorRow + Math.max(1, n), this.cursorCol);
   }
   cursorForward(n: number): void {
-    this.withCursorMove(() => {
-      this.cursorCol = Math.min(this.cols - 1, this.cursorCol + Math.max(1, n));
-    });
+    this.setCursorForced(this.cursorRow, this.cursorCol + Math.max(1, n));
   }
   cursorBack(n: number): void {
-    this.withCursorMove(() => {
-      this.cursorCol = Math.max(0, this.cursorCol - Math.max(1, n));
-    });
+    this.setCursorForced(this.cursorRow, this.cursorCol - Math.max(1, n));
   }
 
   eraseInDisplay(mode: number): void {

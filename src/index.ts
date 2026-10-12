@@ -60,15 +60,10 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   const renderer = new DomRenderer(el, grid, theme);
 
   // Wait a frame so fonts settle and viewport has size.
-  const docAny = document as unknown as { fonts?: { ready?: Promise<unknown>; status?: string } };
-  const hostHasSize = el.clientWidth > 0 && el.clientHeight > 0;
-  if (!hostHasSize || docAny.fonts?.status !== 'loaded') await nextFrame();
-  if (docAny.fonts?.ready && docAny.fonts.status !== 'loaded') {
-    try {
-      await docAny.fonts.ready;
-    } catch {
-      /* noop */
-    }
+  const fonts = (document as unknown as { fonts?: { ready: Promise<unknown>; status: string } }).fonts;
+  if (!el.clientHeight || fonts?.status !== 'loaded') {
+    await nextFrame();
+    await fonts?.ready.catch(() => undefined);
   }
   renderer.measure();
   renderer.fit();

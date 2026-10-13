@@ -1,0 +1,54 @@
+# cloudterm
+
+Install: `npm i cloudterm` (`bun add cloudterm`, `pnpm add cloudterm`).
+
+A CSS import and explicitly sized host are required.
+
+index.html:
+```html
+<div id="terminal" style="width: 800px; height: 400px"></div>
+<script type="module" src="/main.js"></script>
+```
+
+main.js:
+```js
+import { mount } from 'cloudterm';
+import 'cloudterm/style.css';
+const decoder = new TextDecoder();
+const term = await mount(document.querySelector('#terminal'), {
+  onData(bytes) { console.log(decoder.decode(bytes)); },
+});
+term.write('ready\r\n');
+term.focus();
+```
+
+`onData` receives a `Uint8Array`. Decode it before sending text to a transport.
+
+API:
+```ts
+interface Theme {
+  background: string; foreground: string; cursor: string;
+  fontFamily: string; fontSize: number;
+}
+interface SearchOptions { caseSensitive?: boolean; regex?: boolean; }
+interface SearchMatch { line: number; col: number; length: number; }
+interface MountOptions {
+  onData: (data: Uint8Array) => void;
+  onResize?: (cols: number, rows: number) => void;
+  onTitle?: (title: string) => void;
+  onCwd?: (uri: string) => void;
+  onClipboard?: (text: string, selection: string) => void;
+  theme?: Partial<Theme>; maxScrollback?: number;
+  predictionMode?: 'off' | 'auto';
+}
+interface Terminal {
+  write(data: string | Uint8Array): void; fit(): void; focus(): void; destroy(): void;
+  search(query: string, opts?: SearchOptions): SearchMatch[];
+  findNext(query: string, opts?: SearchOptions): SearchMatch | null;
+  findPrevious(query: string, opts?: SearchOptions): SearchMatch | null;
+  clearSearch(): void; serialize(): string; restore(data: string): void;
+  readonly cols: number; readonly rows: number;
+}
+declare function mount(el: HTMLElement, opts: MountOptions): Promise<Terminal>;
+export { MountOptions, type SearchMatch, type SearchOptions, Terminal, type Theme, mount };
+```

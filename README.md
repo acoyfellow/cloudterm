@@ -1,86 +1,95 @@
 # cloudterm
 
-Tiny DOM terminal emulator for the web. It renders terminal output as real text, handles xterm-style keyboard input, and stays small enough to embed anywhere.
+Tiny DOM-rendered terminal emulator for the web.
 
 [![CI](https://github.com/acoyfellow/cloudterm/actions/workflows/ci.yml/badge.svg)](https://github.com/acoyfellow/cloudterm/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Live demo / benchmark:** [termlab.coey.dev](https://termlab.coey.dev/)
+## Quick start
 
-## Why
-
-Most browser terminals are canvas-heavy, addon-heavy, or tightly coupled to a transport. cloudterm is the opposite:
-
-- **DOM-rendered text** — selectable, inspectable `<span>` runs instead of canvas pixels
-- **Virtualized painting** — only visible lines plus overscan are in the DOM
-- **Small surface area** — one dependency, no addons, no framework wrapper
-- **Bring your own transport** — wire it to a PTY, WebSocket, Worker, or test harness
-- **Speculative local echo** — optional client-side prediction for high-latency shells
-
-## Install
+Install the package:
 
 ```sh
-bun add github:acoyfellow/cloudterm#v0.0.3
+npm i cloudterm
+# bun add cloudterm
+# pnpm add cloudterm
 ```
 
-## Use
+Create a host with an explicit size in `index.html`:
 
-```ts
+```html
+<div id="terminal" style="width: 800px; height: 400px"></div>
+<script type="module" src="/main.js"></script>
+```
+
+Then put this in `main.js`:
+
+```js
 import { mount } from 'cloudterm';
 import 'cloudterm/style.css';
 
+const decoder = new TextDecoder();
+const el = document.querySelector('#terminal');
+
 const term = await mount(el, {
-  onData: (bytes) => ws.send(bytes),
-  onResize: (cols, rows) => resizePty(cols, rows),
+  onData(bytes) {
+    const text = decoder.decode(bytes);
+    console.log('send input to your server:', text);
+  },
 });
 
-ws.onmessage = (event) => term.write(event.data);
+term.write('cloudterm is ready\r\n');
 term.focus();
 ```
 
-`cloudterm` does not create a shell or WebSocket for you. It is the terminal UI layer: bytes in, bytes out.
+The CSS import and a measurable host element are required. `onData` receives a `Uint8Array`; decode it before sending text to a transport. This is everything needed for an embed; full types are below.
+
+## Why
+
+cloudterm renders selectable terminal text in the DOM and leaves the transport to your application. It has one runtime dependency and no framework wrapper.
 
 ## Properties
 
 | | |
 |---|---|
-| Renderer | DOM (`<span>` runs, pretext-measured, line-virtualized) |
-| Parser | ANSI / CSI / OSC state machine |
-| Keyboard | Ported from xterm.js `evaluateKeyboardEvent` |
+| Renderer | DOM text with virtualized visible lines |
 | Dependencies | 1 (`@chenglou/pretext`) |
-| Bundle | 37,913 bytes raw, 10,938 bytes gzip |
+| Bundle | 48,483 bytes raw, 14,335 bytes gzip |
 | License | MIT |
 
 ## How it works
 
-Input goes `textarea -> keydown/input/paste -> evaluateKeyboardEvent -> onData bytes`. A hidden textarea overlays the host at `opacity:0` so clicks focus naturally and the browser gives us IME, paste, and platform shortcuts for free.
-
-Output goes `write(bytes) -> ANSI parser -> Grid (cells + scrollback) -> DomRenderer -> rAF paint`. The renderer only paints visible lines plus an overscan band; line height and char width come from `@chenglou/pretext` at mount time, avoiding layout reads in the hot paint path.
-
-```
-  ┌─ input path ─────────────────────────────┐    ┌─ output path ──────────────────────┐
-  │  textarea.keydown/input/paste            │    │  write(data)                       │
-  │     → evaluateKeyboardEvent (xterm port) │    │     → AnsiParser (CSI/OSC/SGR)     │
-  │     → MountOptions.onData(Uint8Array)    │    │     → Grid (cells, scrollback)     │
-  │     → you send to PTY / WebSocket        │    │     → DomRenderer.paint() on rAF   │
-  └──────────────────────────────────────────┘    └────────────────────────────────────┘
-```
+Call `write` with server output. cloudterm parses terminal escapes and paints the visible grid in the host element. Keyboard and paste input arrive at `onData` as bytes for your transport to send; call `focus` after mounting when the terminal should accept input.
 
 ## API
 
 ```ts
-function mount(el: HTMLElement, opts: MountOptions): Promise<Terminal>;
-
+interface Theme {
+  background: string;
+  foreground: string;
+  cursor: string;
+  fontFamily: string;
+  fontSize: number;
+}
+interface SearchOptions {
+  caseSensitive?: boolean;
+  regex?: boolean;
+}
+interface SearchMatch {
+  line: number;
+  col: number;
+  length: number;
+}
 interface MountOptions {
   onData: (data: Uint8Array) => void;
   onResize?: (cols: number, rows: number) => void;
   onTitle?: (title: string) => void;
   onCwd?: (uri: string) => void;
+  onClipboard?: (text: string, selection: string) => void;
   theme?: Partial<Theme>;
   maxScrollback?: number;
-  predictionMode?: 'off' | 'auto'; // default 'auto'
+  predictionMode?: 'off' | 'auto';
 }
-
 interface Terminal {
   write(data: string | Uint8Array): void;
   fit(): void;
@@ -95,17 +104,24 @@ interface Terminal {
   readonly cols: number;
   readonly rows: number;
 }
-
-interface Theme {
-  background: string;
-  foreground: string;
-  cursor: string;
-  fontFamily: string;
-  fontSize: number;
-}
+declare function mount(el: HTMLElement, opts: MountOptions): Promise<Terminal>;
+export { MountOptions, type SearchMatch, type SearchOptions, Terminal, type Theme, mount };
 ```
 
-`mount` is async. It waits for fonts and a measurable host element before resolving.
+- `Theme.background`, `foreground`, `cursor`, `fontFamily`, and `fontSize` set terminal appearance.
+- `SearchOptions.caseSensitive` matches letter case; `regex` treats the query as a regular expression.
+- `SearchMatch.line`, `col`, and `length` locate one search result.
+- `MountOptions.onData` receives terminal input bytes.
+- `onResize` receives the measured column and row count.
+- `onTitle` receives OSC window-title changes.
+- `onCwd` receives OSC current-working-directory URIs.
+- `onClipboard` receives OSC clipboard text and its selection name.
+- `theme` overrides theme values; `maxScrollback` limits retained lines; `predictionMode` is `'off'` or `'auto'`.
+- `Terminal.write` displays text or bytes; `fit` recomputes dimensions; `focus` focuses input; `destroy` removes the terminal.
+- `search`, `findNext`, `findPrevious`, and `clearSearch` manage search results.
+- `serialize` saves state and `restore` loads it.
+- `cols` and `rows` are the current measured dimensions.
+- `mount` waits for the host to be measurable and returns a terminal.
 
 ## Theme via CSS variables
 
@@ -119,84 +135,21 @@ interface Theme {
 }
 ```
 
-## Supported escapes
-
-| Category | Sequences |
-|---|---|
-| SGR | 0, 1, 3, 4, 7, 22, 23, 24, 27, 30-37, 38;5;N, 38;2;r;g;b, 39, 40-47, 48;5;N, 48;2;r;g;b, 49, 90-97, 100-107 |
-| Cursor | CUU/CUD/CUF/CUB, CNL/CPL, CHA, CUP, save/restore |
-| Erase | ED (0/1/2/3), EL (0/1/2) |
-| Scroll | SU, SD |
-| Modes | alt screen (`?47`, `?1047`, `?1049`), application cursor (`?1`), bracketed paste (`?2004`) |
-| C0 | BS, HT, LF/VT/FF, CR, BEL |
-| OSC | 0, 1, 2 (window title), 7 (current working directory) |
-
-## Supported keys
-
-| Combo | Emits |
-|---|---|
-| Ctrl+Left / Ctrl+Right | `CSI 1;5D` / `CSI 1;5C` |
-| Shift+Arrow | `CSI 1;2<dir>` |
-| Alt+B / Alt+F | `ESC b` / `ESC f` |
-| Ctrl+A through Ctrl+Z | C0 0x01 through 0x1a |
-| F1-F12 with any modifier | SS3 / CSI form, 96 combinations |
-| Home / End / PageUp / PageDown / Insert / Delete | per xterm spec |
-| Cmd+A / Cmd+C / Cmd+V | null (browser handles) |
-
-## Speculative local echo
-
-Typed characters paint as a dimmed overlay at the predicted cursor position while the client waits for the server's echo. When the echo arrives, the overlay cell and the authoritative cell agree and the user sees no glitch. When they disagree, the authoritative paint overwrites the overlay.
-
-The overlay is client-only: the authoritative `Grid` is never touched speculatively. Predictions are recorded for printable characters and Backspace; control sequences, arrow keys, Cmd-combos, and pastes do not generate predictions. Predictions are disabled automatically while the alternate-screen buffer is active (vim, less, tmux) or while DECCKM is set.
-
-Set `predictionMode: 'off'` in `MountOptions` to disable the whole system.
-
-**Known limitation:** Password prompts that use `stty -echo` do not echo typed characters back. cloudterm paints the predicted character, then the 500ms TTL sweeps it away. The overlay briefly shows the typed character. This is a client-only leak onto the user's own screen; the character is never transmitted anywhere the server did not intend. A full fix requires tracking the PTY's echo mode, which cloudterm does not do.
-
 ## Not included
 
-- No canvas or WebGL renderer
-- No transport (bring your own WebSocket or PTY)
-- No framework wrappers
-- No addon system
-- No mouse reporting
-- No link detection
-- No built-in selection layer (browser selection handles DOM text)
-- No per-RTT calibration for speculative echo (always on when enabled)
-
-## Demo
-
-Try cloudterm in the browser at [termlab.coey.dev](https://termlab.coey.dev/). The demo compares rendering behavior side-by-side and is the easiest way to see the DOM renderer, keyboard path, and speculative local echo in action.
+- A shell, PTY, or WebSocket transport
+- Framework wrappers or addons
+- Canvas or WebGL rendering
 
 ## Development
 
 ```sh
 bun install
-bun test
-bun run typecheck
 bun run build
 bun run size
+bun run check:readme
+bun test
 ```
-
-`bun run size` enforces the gzip bundle-size budget.
-
-`bun run dev:demo` starts the live-reloading browser demo.
-
-`bun run demo:check` runs the headless demo check when Chromium is available.
-
-There is also a real-PTY smoke harness:
-
-```sh
-bun run smoke
-```
-
-It drives a shell through `node-pty`, feeds the resulting bytes into cloudterm's headless parser/grid, and writes `test/REPORT.md` for inspection.
-
-## Related
-
-- [termlab.coey.dev](https://termlab.coey.dev/) — cloudterm in a live side-by-side benchmark
-- [@chenglou/pretext](https://github.com/chenglou/pretext) — text measurement foundation
-- [xterm.js](https://github.com/xtermjs/xterm.js) — keyboard handling ported from here
 
 ## License
 

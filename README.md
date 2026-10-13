@@ -5,6 +5,8 @@ Tiny DOM-rendered terminal emulator for the web.
 [![CI](https://github.com/acoyfellow/cloudterm/actions/workflows/ci.yml/badge.svg)](https://github.com/acoyfellow/cloudterm/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+Live demo and benchmarks: [termlab.coey.dev](https://termlab.coey.dev/)
+
 ## Quick start
 
 Install the package:

@@ -1,5 +1,7 @@
 # cloudterm
 
+> DOM web terminal: mount it into a sized element, write bytes in, get keyboard bytes out.
+
 Install: `npm i cloudterm` (`bun add cloudterm`, `pnpm add cloudterm`).
 
 A CSS import and explicitly sized host are required.
@@ -15,7 +17,9 @@ main.js:
 import { mount } from 'cloudterm';
 import 'cloudterm/style.css';
 const decoder = new TextDecoder();
-const term = await mount(document.querySelector('#terminal'), {
+const el = document.getElementById('terminal');
+if (!el) throw new Error('missing #terminal element');
+const term = await mount(el, {
   onData(bytes) { console.log(decoder.decode(bytes)); },
 });
 term.write('ready\r\n');

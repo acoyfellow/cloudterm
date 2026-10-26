@@ -31,7 +31,8 @@ import { mount } from 'cloudterm';
 import 'cloudterm/style.css';
 
 const decoder = new TextDecoder();
-const el = document.querySelector('#terminal');
+const el = document.getElementById('terminal');
+if (!el) throw new Error('missing #terminal element');
 
 const term = await mount(el, {
   onData(bytes) {

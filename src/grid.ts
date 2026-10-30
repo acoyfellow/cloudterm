@@ -54,16 +54,21 @@ function asciiCells(attr: CellAttr): Cell[] {
   return cells;
 }
 
-function isWideAt(row: Cell[], col: number): boolean {
-  return row[col]!.ch > '~' && wcwidth(row[col]!.ch) === 2;
-}
-
 export function blankCell(): Cell {
   return BLANK;
 }
 
-export function makeRow(cols: number): Cell[] {
-  return new Array<Cell>(cols).fill(BLANK);
+const CHAR_BITS = 21;
+const CHAR_MASK = (1 << CHAR_BITS) - 1;
+const CONTINUATION = 0;
+
+export class Row {
+  codes: Uint32Array;
+  constructor(cols: number) { this.codes = new Uint32Array(cols); this.codes.fill(32); }
+}
+
+export function makeRow(cols: number): Row {
+  return new Row(cols);
 }
 
 export interface GridSnapshot {
@@ -135,8 +140,8 @@ export class Grid {
   rows: number;
   maxScrollback: number;
 
-  screen: Cell[][] = [];
-  scrollback: RingBuffer<Cell[]>;
+  private rowsData: Row[] = [];
+  scrollback: RingBuffer<Row>;
   trimmed = 0;
 
   cursorRow = 0;
@@ -155,9 +160,9 @@ export class Grid {
   // at the alt buffer and `scrollback` is an empty array. The main-screen
   // buffer + real scrollback are stashed in the `main*` fields until exit.
   inAltScreen = false;
-  private altScreen: Cell[][] = [];
-  private mainScreen: Cell[][] = [];
-  private mainScrollback: RingBuffer<Cell[]> | null = null;
+  private altScreen: Row[] = [];
+  private mainScreen: Row[] = [];
+  private mainScrollback: RingBuffer<Row> | null = null;
   private mainTrimmed = 0;
   private altReturnRow = 0;
   private altReturnCol = 0;
@@ -185,12 +190,46 @@ export class Grid {
     this.cols = Math.max(1, cols);
     this.rows = Math.max(1, rows);
     this.maxScrollback = Math.max(0, maxScrollback);
-    this.scrollback = new RingBuffer<Cell[]>(this.maxScrollback);
-    this.screen = Array.from({ length: this.rows }, () => makeRow(this.cols));
+    this.scrollback = new RingBuffer<Row>(this.maxScrollback);
+    this.rowsData = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.altScreen = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.dirtyRows = new Uint32Array(this.rows);
     this.scrollBottom = this.rows - 1;
   }
+
+  private attrIndexes = new Map<CellAttr, number>([[DEFAULT_ATTR, 0]]);
+  private attrs: CellAttr[] = [DEFAULT_ATTR];
+  private strings: string[] = [];
+  private stringIndexes = new Map<string, number>();
+
+  private code(cell: Cell): number {
+    let attr = this.attrIndexes.get(cell.attr);
+    if (attr === undefined) { attr = this.attrs.length; this.attrs.push(cell.attr); this.attrIndexes.set(cell.attr, attr); }
+    let ch: number;
+    if (cell.ch === '') ch = CONTINUATION;
+    else if (cell.ch.length === 1 && cell.ch.charCodeAt(0) < 128) ch = cell.ch.charCodeAt(0);
+    else { let i = this.stringIndexes.get(cell.ch); if (i === undefined) { i = this.strings.length; this.strings.push(cell.ch); this.stringIndexes.set(cell.ch, i); } ch = 128 + i; }
+    return (attr << CHAR_BITS) | ch;
+  }
+
+  private isWideAt(row: Row, col: number): boolean { const ch = this.cellAt(row, col).ch; return ch > '~' && wcwidth(ch) === 2; }
+
+  cellAt(row: Row, col: number): Cell {
+    const code = row.codes[col]!;
+    const ch = (code & CHAR_MASK) === CONTINUATION ? '' : (code & CHAR_MASK) < 128 ? String.fromCharCode(code & CHAR_MASK) : this.strings[(code & CHAR_MASK) - 128]!;
+    return internCell(ch, this.attrs[code >>> CHAR_BITS]!);
+  }
+
+  setCell(row: Row, col: number, cell: Cell): void { row.codes[col] = this.code(cell); }
+  fillRow(row: Row, cell = BLANK): void { row.codes.fill(this.code(cell)); }
+  private cells(row: Row): Cell[] { return Array.from(row.codes, (_, col) => this.cellAt(row, col)); }
+  private rowFrom(cells: Cell[]): Row { const row = makeRow(cells.length); for (let i = 0; i < cells.length; i++) this.setCell(row, i, cells[i]!); return row; }
+
+  get screen(): Cell[][] {
+    const rows = this.rowsData.map((row) => new Proxy(this.cells(row), { get: (target, key, receiver) => { if (typeof key === 'string' && /^\d+$/.test(key)) return this.cellAt(row, Number(key)); return Reflect.get(target, key, receiver); }, set: (target, key, value) => { if (typeof key === 'string' && /^\d+$/.test(key)) { this.setCell(row, Number(key), value as Cell); return true; } return Reflect.set(target, key, value); } }));
+    return new Proxy(rows, { set: (target, key, value) => { if (typeof key === 'string' && /^\d+$/.test(key)) { this.rowsData[Number(key)] = this.rowFrom(value as Cell[]); return true; } return Reflect.set(target, key, value); } });
+  }
+  set screen(value: Cell[][]) { this.rowsData = value.map((row) => this.rowFrom(row)); }
 
   private get regionIsFullScreen(): boolean {
     return this.scrollTop === 0 && this.scrollBottom === this.rows - 1;
@@ -220,9 +259,9 @@ export class Grid {
   private scrollRegionUp(top: number, bottom: number, n: number): void {
     const count = Math.min(n, bottom - top + 1);
     for (let i = 0; i < count; i++) {
-      const [gone] = this.screen.splice(top, 1);
+      const [gone] = this.rowsData.splice(top, 1);
       if (gone && top === 0 && bottom === this.rows - 1) this.pushScrollback(gone);
-      this.screen.splice(bottom, 0, makeRow(this.cols));
+      this.rowsData.splice(bottom, 0, makeRow(this.cols));
     }
     this.markRange(top, bottom);
   }
@@ -230,8 +269,8 @@ export class Grid {
   private scrollRegionDown(top: number, bottom: number, n: number): void {
     const count = Math.min(n, bottom - top + 1);
     for (let i = 0; i < count; i++) {
-      this.screen.splice(bottom, 1);
-      this.screen.splice(top, 0, makeRow(this.cols));
+      this.rowsData.splice(bottom, 1);
+      this.rowsData.splice(top, 0, makeRow(this.cols));
     }
     this.markRange(top, bottom);
   }
@@ -252,36 +291,36 @@ export class Grid {
     if (this.cursorRow < this.scrollTop || this.cursorRow > this.scrollBottom) return;
     const count = Math.min(Math.max(1, n), this.scrollBottom - this.cursorRow + 1);
     for (let i = 0; i < count; i++) {
-      this.screen.splice(this.cursorRow, 1);
-      this.screen.splice(this.scrollBottom, 0, makeRow(this.cols));
+      this.rowsData.splice(this.cursorRow, 1);
+      this.rowsData.splice(this.scrollBottom, 0, makeRow(this.cols));
     }
     this.markRange(this.cursorRow, this.scrollBottom);
     this.cursorCol = 0;
   }
 
   insertChars(n: number): void {
-    const row = this.screen[this.cursorRow]!;
+    const row = this.rowsData[this.cursorRow]!;
     const col = Math.min(this.cursorCol, this.cols - 1);
     const count = Math.min(Math.max(1, n), this.cols - col);
-    row.splice(col, 0, ...Array.from({ length: count }, blankCell));
-    row.length = this.cols;
+    row.codes.copyWithin(col + count, col, this.cols - count);
+    row.codes.fill(this.code(BLANK), col, col + count);
     this.normalizeRow(row);
     this.markRow(this.cursorRow);
   }
 
   deleteChars(n: number): void {
-    const row = this.screen[this.cursorRow]!;
+    const row = this.rowsData[this.cursorRow]!;
     const col = Math.min(this.cursorCol, this.cols - 1);
     const count = Math.min(Math.max(1, n), this.cols - col);
-    row.splice(col, count);
-    while (row.length < this.cols) row.push(blankCell());
+    row.codes.copyWithin(col, col + count);
+    row.codes.fill(this.code(BLANK), this.cols - count);
     this.normalizeRow(row);
     this.markRow(this.cursorRow);
   }
 
   eraseChars(n: number): void {
     this.clearPendingWrap();
-    const row = this.screen[this.cursorRow]!;
+    const row = this.rowsData[this.cursorRow]!;
     const col = Math.min(this.cursorCol, this.cols - 1);
     const end = Math.min(this.cols, col + Math.max(1, n));
     for (let c = col; c < end; c++) this.clearCell(row, c);
@@ -360,7 +399,7 @@ export class Grid {
     if (cols === this.cols && rows === this.rows) return;
 
     // Resize whichever buffer is currently active.
-    this.resizeBuffer(this.screen, cols, rows, /*pushExcess*/ true);
+    this.resizeBuffer(this.rowsData, cols, rows, true);
     // Resize the inactive buffer too, so a later swap sees correct shape.
     // No scrollback push for the inactive buffer.
     const inactive = this.inAltScreen ? this.mainScreen : this.altScreen;
@@ -378,16 +417,17 @@ export class Grid {
   }
 
   private resizeBuffer(
-    buf: Cell[][],
+    buf: Row[],
     cols: number,
     rows: number,
     pushExcess: boolean,
   ): void {
     for (const row of buf) {
-      if (row.length < cols) {
-        for (let i = row.length; i < cols; i++) row.push(blankCell());
-      } else if (row.length > cols) {
-        row.length = cols;
+      if (row.codes.length !== cols) {
+        const codes = new Uint32Array(cols);
+        codes.fill(this.code(BLANK));
+        codes.set(row.codes.subarray(0, cols));
+        row.codes = codes;
       }
     }
     if (buf.length < rows) {
@@ -401,12 +441,13 @@ export class Grid {
     }
   }
 
-  private freshRow(gone: Cell[] | undefined): Cell[] {
+  private freshRow(gone: Row | undefined): Row {
     const recycled = gone && this.pushScrollback(gone);
-    return recycled?.length === this.cols ? recycled.fill(BLANK) : makeRow(this.cols);
+    if (recycled?.codes.length === this.cols) { this.fillRow(recycled); return recycled; }
+    return makeRow(this.cols);
   }
 
-  private pushScrollback(row: Cell[]): Cell[] | undefined {
+  private pushScrollback(row: Row): Row | undefined {
     if (this.inAltScreen || this.maxScrollback === 0) return undefined;
     if (!this.scrollback.push(row)) return undefined;
     this.trimmed += 1;
@@ -438,24 +479,24 @@ export class Grid {
   }
 
   writeAscii(text: string, attr: CellAttr): void {
-    const cells = asciiCells(attr);
+    const attrCode = this.code({ ch: ' ', attr }) & ~CHAR_MASK;
     let index = 0;
     while (index < text.length) {
       if (this.pendingWrap) this.wrapToNextLine();
-      const row = this.screen[this.cursorRow]!;
+      const row = this.rowsData[this.cursorRow]!;
       const start = this.cursorCol;
       const end = Math.min(this.cols, start + text.length - index);
-      if (row[start]!.ch === '' || isWideAt(row, start)) this.clearCell(row, start);
-      if (end < this.cols && row[end]!.ch === '') row[end] = BLANK;
-      for (let col = start; col < end; col++, index++) {
-        row[col] = cells[text.charCodeAt(index)] ??= internCell(text[index]!, attr);
-      }
+      if (this.cellAt(row, start).ch === '' || this.isWideAt(row, start)) this.clearCell(row, start);
+      if (end < this.cols && this.cellAt(row, end).ch === '') this.setCell(row, end, BLANK);
+      for (let col = start; col < end; col++, index++) { const ch = text[index]!; const code = ch.charCodeAt(0); if (code < 128) row.codes[col] = attrCode | code; else this.setCell(row, col, internCell(ch, attr)); }
       this.markRow(this.cursorRow);
       this.cursorCol = Math.min(end, this.cols - 1);
       if (end === this.cols) {
         this.pendingWrap = this.autoWrapMode;
         if (!this.autoWrapMode && index < text.length) {
-          row[end - 1] = internCell(text[text.length - 1]!, attr);
+          const ch = text[text.length - 1]!;
+          if (ch.charCodeAt(0) < 128) row.codes[end - 1] = attrCode | ch.charCodeAt(0);
+          else this.setCell(row, end - 1, internCell(ch, attr));
           return;
         }
       }
@@ -470,18 +511,18 @@ export class Grid {
     }
     if (this.pendingWrap) this.wrapToNextLine();
     if (width === 2 && this.cursorCol === this.cols - 1) {
-      const row = this.screen[this.cursorRow]!;
+      const row = this.rowsData[this.cursorRow]!;
       this.clearCell(row, this.cursorCol);
       this.markRow(this.cursorRow);
       if (!this.autoWrapMode) return;
       this.wrapToNextLine();
     }
-    const row = this.screen[this.cursorRow]!;
+    const row = this.rowsData[this.cursorRow]!;
     this.clearCell(row, this.cursorCol);
-    row[this.cursorCol] = internCell(ch, attr);
+    this.setCell(row, this.cursorCol, internCell(ch, attr));
     if (width === 2) {
       this.clearCell(row, this.cursorCol + 1);
-      row[this.cursorCol + 1] = { ch: '', attr };
+      this.setCell(row, this.cursorCol + 1, { ch: '', attr });
     }
     this.markRow(this.cursorRow);
     const next = this.cursorCol + width;
@@ -494,34 +535,34 @@ export class Grid {
   }
 
   private appendCombining(ch: string): void {
-    const row = this.screen[this.cursorRow]!;
+    const row = this.rowsData[this.cursorRow]!;
     let col = this.pendingWrap ? this.cols - 1 : this.cursorCol - 1;
     if (col < 0) return;
-    if (row[col]!.ch === '') col -= 1;
-    if (col < 0 || row[col]!.ch === ' ') return;
-    row[col] = { ...row[col]!, ch: row[col]!.ch + ch };
+    if (this.cellAt(row, col).ch === '') col -= 1;
+    if (col < 0 || this.cellAt(row, col).ch === ' ') return;
+    this.setCell(row, col, { ...this.cellAt(row, col), ch: this.cellAt(row, col).ch + ch });
     this.markRow(this.cursorRow);
   }
 
-  private clearCell(row: Cell[], col: number): void {
+  private clearCell(row: Row, col: number): void {
     if (col < 0 || col >= this.cols) return;
-    if (row[col]!.ch === '') {
-      row[col] = blankCell();
-      if (col > 0) row[col - 1] = blankCell();
+    if (this.cellAt(row, col).ch === '') {
+      this.setCell(row, col, blankCell());
+      if (col > 0) this.setCell(row, col - 1, blankCell());
       return;
     }
-    if (wcwidth(row[col]!.ch) === 2 && col + 1 < this.cols && row[col + 1]!.ch === '') {
-      row[col + 1] = blankCell();
+    if (wcwidth(this.cellAt(row, col).ch) === 2 && col + 1 < this.cols && this.cellAt(row, col + 1).ch === '') {
+      this.setCell(row, col + 1, blankCell());
     }
-    row[col] = blankCell();
+    this.setCell(row, col, blankCell());
   }
 
-  private normalizeRow(row: Cell[]): void {
+  private normalizeRow(row: Row): void {
     for (let col = 0; col < this.cols; col++) {
-      if (row[col]!.ch === '') {
-        if (col === 0 || wcwidth(row[col - 1]!.ch) !== 2) row[col] = blankCell();
-      } else if (wcwidth(row[col]!.ch) === 2) {
-        if (col === this.cols - 1 || row[col + 1]!.ch !== '') row[col] = blankCell();
+      if (this.cellAt(row, col).ch === '') {
+        if (col === 0 || wcwidth(this.cellAt(row, col - 1).ch) !== 2) this.setCell(row, col, blankCell());
+      } else if (wcwidth(this.cellAt(row, col).ch) === 2) {
+        if (col === this.cols - 1 || this.cellAt(row, col + 1).ch !== '') this.setCell(row, col, blankCell());
       }
     }
   }
@@ -556,8 +597,8 @@ export class Grid {
       // the bottom. All visible rows' content moved up one screen slot,
       // but their absolute indexes are stable. The new bottom row is
       // fresh content and the cursor is now on it.
-      const gone = this.screen.shift();
-      this.screen.push(this.freshRow(gone));
+      const gone = this.rowsData.shift();
+      this.rowsData.push(this.freshRow(gone));
       // New bottom row's absolute index is the one the cursor is on now.
       this.dirtyRows.copyWithin(0, 1);
       this.dirtyRows[this.rows - 1] = 0;
@@ -601,24 +642,24 @@ export class Grid {
     this.clearPendingWrap();
     // 0: cursor to end; 1: start to cursor; 2/3: entire screen
     if (mode === 2 || mode === 3) {
-      for (let r = 0; r < this.rows; r++) this.screen[r] = makeRow(this.cols);
+      for (let r = 0; r < this.rows; r++) this.rowsData[r] = makeRow(this.cols);
       this.markRange(0, this.rows - 1);
     } else if (mode === 1) {
-      for (let r = 0; r < this.cursorRow; r++) this.screen[r] = makeRow(this.cols);
-      const row = this.screen[this.cursorRow]!;
+      for (let r = 0; r < this.cursorRow; r++) this.rowsData[r] = makeRow(this.cols);
+      const row = this.rowsData[this.cursorRow]!;
       for (let c = 0; c <= this.cursorCol && c < this.cols; c++) this.clearCell(row, c);
       this.markRange(0, this.cursorRow);
     } else {
-      const row = this.screen[this.cursorRow]!;
+      const row = this.rowsData[this.cursorRow]!;
       for (let c = this.cursorCol; c < this.cols; c++) this.clearCell(row, c);
-      for (let r = this.cursorRow + 1; r < this.rows; r++) this.screen[r] = makeRow(this.cols);
+      for (let r = this.cursorRow + 1; r < this.rows; r++) this.rowsData[r] = makeRow(this.cols);
       this.markRange(this.cursorRow, this.rows - 1);
     }
   }
 
   eraseInLine(mode: number): void {
     this.clearPendingWrap();
-    const row = this.screen[this.cursorRow]!;
+    const row = this.rowsData[this.cursorRow]!;
     if (mode === 1) {
       for (let c = 0; c <= this.cursorCol && c < this.cols; c++) this.clearCell(row, c);
     } else if (mode === 2) {
@@ -636,8 +677,8 @@ export class Grid {
       return;
     }
     for (let i = 0; i < n; i++) {
-      const gone = this.screen.shift();
-      this.screen.push(this.freshRow(gone));
+      const gone = this.rowsData.shift();
+      this.rowsData.push(this.freshRow(gone));
     }
     // All visible rows' content shifted but absolute indexes are stable;
     // content at each visible absolute index changed, so mark them all.
@@ -650,8 +691,8 @@ export class Grid {
       return;
     }
     for (let i = 0; i < n; i++) {
-      this.screen.pop();
-      this.screen.unshift(makeRow(this.cols));
+      this.rowsData.pop();
+      this.rowsData.unshift(makeRow(this.cols));
     }
     this.markRange(0, this.rows - 1);
   }
@@ -662,9 +703,9 @@ export class Grid {
 
   getLine(index: number): Cell[] {
     const relative = index - this.trimmed;
-    if (relative >= 0 && relative < this.scrollback.length) return this.scrollback.get(relative)!;
-    const r = this.screen[relative - this.scrollback.length];
-    return r ?? makeRow(this.cols);
+    if (relative >= 0 && relative < this.scrollback.length) return this.cells(this.scrollback.get(relative)!);
+    const r = this.rowsData[relative - this.scrollback.length];
+    return r ? this.cells(r) : this.cells(makeRow(this.cols));
   }
 
   clearScrollback(): void {
@@ -674,16 +715,16 @@ export class Grid {
   }
 
   serialize(): string {
-    const sourceScreen = this.inAltScreen ? this.mainScreen : this.screen;
+    const sourceScreen = this.inAltScreen ? this.mainScreen : this.rowsData;
     const sourceScrollback = this.inAltScreen ? this.mainScrollback! : this.scrollback;
     const sourceTrimmed = this.inAltScreen ? this.mainTrimmed : this.trimmed;
     const attrs: CellAttr[] = [];
     const indexes = new Map<string, number>();
-    const line = (cells: Cell[]): SerializedLine => {
+    const line = (cells: Row): SerializedLine => {
       const runs: SerializedLine = [];
       let text = '';
       let index = -1;
-      for (const cell of cells) {
+      for (const cell of this.cells(cells)) {
         const key = JSON.stringify(cell.attr);
         let next = indexes.get(key);
         if (next === undefined) {
@@ -706,7 +747,7 @@ export class Grid {
     };
     const lines: SerializedLine[] = [];
     const lineIndexes = new Map<string, number>();
-    const encodeLine = (cells: Cell[]): number => {
+    const encodeLine = (cells: Row): number => {
       const runs = line(cells);
       const key = JSON.stringify(runs);
       let index = lineIndexes.get(key);
@@ -733,7 +774,7 @@ export class Grid {
     const validMouseTracking = (value: unknown): value is 0 | 9 | 1000 | 1002 | 1003 => value === 0 || value === 9 || value === 1000 || value === 1002 || value === 1003;
     if (!snapshot || snapshot.v !== 1 || !Number.isInteger(snapshot.cols) || snapshot.cols < 1 || !Number.isInteger(snapshot.rows) || snapshot.rows < 1 || !Array.isArray(snapshot.cursor) || snapshot.cursor.length !== 2 || !snapshot.cursor.every(Number.isInteger) || !snapshot.modes || typeof snapshot.modes !== 'object' || typeof snapshot.modes.applicationCursor !== 'boolean' || typeof snapshot.modes.bracketedPaste !== 'boolean' || typeof snapshot.modes.autowrap !== 'boolean' || !validMouseTracking(snapshot.modes.mouseTracking) || typeof snapshot.modes.mouseSgr !== 'boolean' || !Array.isArray(snapshot.attrs) || !snapshot.attrs.every(validAttr) || !Array.isArray(snapshot.lines) || !Array.isArray(snapshot.scrollback) || !snapshot.scrollback.every(Number.isInteger) || !Array.isArray(snapshot.screen) || !snapshot.screen.every(Number.isInteger) || !Number.isInteger(snapshot.trimmed) || snapshot.trimmed < 0) throw new Error('Invalid terminal snapshot');
     const sharedAttrs = snapshot.attrs.map((attr) => JSON.stringify(attr) === JSON.stringify(DEFAULT_ATTR) ? DEFAULT_ATTR : Object.freeze({ ...attr }));
-    const decode = (runs: SerializedLine): Cell[] => {
+    const decode = (runs: SerializedLine): Row => {
       if (!Array.isArray(runs)) throw new Error('Invalid terminal snapshot');
       const cells: Cell[] = [];
       for (const run of runs) {
@@ -743,10 +784,10 @@ export class Grid {
       }
       if (cells.length > snapshot.cols) throw new Error('Invalid terminal snapshot');
       while (cells.length < snapshot.cols) cells.push(BLANK);
-      return cells;
+      return this.rowFrom(cells);
     };
     const lines = snapshot.lines.map(decode);
-    const resolveLine = (index: number): Cell[] => {
+    const resolveLine = (index: number): Row => {
       const line = lines[index];
       if (!line) throw new Error('Invalid terminal snapshot');
       return line;
@@ -754,15 +795,15 @@ export class Grid {
     const scrollbackLines = snapshot.scrollback.map(resolveLine);
     const screenLines = snapshot.screen.map(resolveLine);
     if (screenLines.length !== snapshot.rows) throw new Error('Invalid terminal snapshot');
-    const fit = (row: Cell[]): Cell[] => row.slice(0, this.cols).concat(Array.from({ length: Math.max(0, this.cols - row.length) }, blankCell));
+    const fit = (row: Row): Row => { const cells = this.cells(row).slice(0, this.cols); while (cells.length < this.cols) cells.push(BLANK); return this.rowFrom(cells); };
     const screen = screenLines.map(fit);
     while (screen.length > this.rows) scrollbackLines.push(screen.shift()!);
     while (screen.length < this.rows) screen.push(makeRow(this.cols));
-    const scrollback = new RingBuffer<Cell[]>(this.maxScrollback);
+    const scrollback = new RingBuffer<Row>(this.maxScrollback);
     const start = Math.max(0, scrollbackLines.length - this.maxScrollback);
     for (let i = start; i < scrollbackLines.length; i++) scrollback.push(fit(scrollbackLines[i]!));
     this.inAltScreen = false;
-    this.screen = screen;
+    this.rowsData = screen;
     this.scrollback = scrollback;
     this.trimmed = Math.max(0, snapshot.trimmed + start);
     this.cursorRow = Math.max(0, Math.min(this.rows - 1, snapshot.cursor[0]));
@@ -791,7 +832,7 @@ export class Grid {
   enterAltScreen(save: boolean, clear: boolean): void {
     this.clearPendingWrap();
     if (this.inAltScreen) {
-      if (clear) this.blankBuffer(this.screen);
+      if (clear) this.blankBuffer(this.rowsData);
       if (save) {
         this.altReturnRow = this.cursorRow;
         this.altReturnCol = this.cursorCol;
@@ -804,14 +845,14 @@ export class Grid {
       this.altReturnCol = this.cursorCol;
     }
     // Stash main, swap alt in.
-    this.mainScreen = this.screen;
+    this.mainScreen = this.rowsData;
     this.mainScrollback = this.scrollback;
     this.mainTrimmed = this.trimmed;
-    this.screen = this.altScreen;
-    this.scrollback = new RingBuffer<Cell[]>(this.maxScrollback);
+    this.rowsData = this.altScreen;
+    this.scrollback = new RingBuffer<Row>(this.maxScrollback);
     this.trimmed = 0;
     this.inAltScreen = true;
-    if (clear) this.blankBuffer(this.screen);
+    if (clear) this.blankBuffer(this.rowsData);
     this.markAllVisible();
   }
 
@@ -826,10 +867,10 @@ export class Grid {
       }
       return;
     }
-    if (clear) this.blankBuffer(this.screen);
+    if (clear) this.blankBuffer(this.rowsData);
     // Swap back.
-    this.altScreen = this.screen;
-    this.screen = this.mainScreen;
+    this.altScreen = this.rowsData;
+    this.rowsData = this.mainScreen;
     this.scrollback = this.mainScrollback!;
     this.trimmed = this.mainTrimmed;
     this.mainScreen = [];
@@ -855,7 +896,7 @@ export class Grid {
     });
   }
 
-  private blankBuffer(buf: Cell[][]): void {
+  private blankBuffer(buf: Row[]): void {
     for (let r = 0; r < buf.length; r++) buf[r] = makeRow(this.cols);
   }
 

@@ -486,6 +486,29 @@ export class Grid {
     });
   }
 
+  writeAsciiFused(text: string, index: number, attr: CellAttr): number {
+    const attrCode = this.attrCode(attr);
+    if (this.pendingWrap) this.wrapToNextLine();
+    const row = this.rowsData[this.cursorRow]!;
+    const start = this.cursorCol;
+    const startCode = row.codes[start]! & CHAR_MASK;
+    if (startCode === CONTINUATION || this.isWideAt(row, start)) this.clearCell(row, start);
+    let col = start;
+    while (col < this.cols && index < text.length) {
+      const code = text.charCodeAt(index);
+      if (code < 0x20 || code > 0x7e) break;
+      row.codes[col++] = attrCode | code;
+      index += 1;
+    }
+    if (col !== start) {
+      if (col < this.cols && (row.codes[col]! & CHAR_MASK) === CONTINUATION) row.codes[col] = 32;
+      this.markRow(this.cursorRow);
+      this.cursorCol = Math.min(col, this.cols - 1);
+      if (col === this.cols) this.pendingWrap = this.autoWrapMode;
+    }
+    return index;
+  }
+
   writeAscii(text: string, attr: CellAttr, index = 0, limit = text.length): void {
     const attrCode = this.attrCode(attr);
     while (index < limit) {

@@ -63,6 +63,7 @@ export interface ParserSink {
   print(ch: string): void;
   printRun?(text: string): void;
   printRunRange?(text: string, start: number, end: number): void;
+  printAscii?(text: string, index: number, attr: CellAttr): number;
   lineFeed(): void;
   carriageReturn(): void;
   backspace(): void;
@@ -187,6 +188,10 @@ export class AnsiParser {
     while (index < text.length) {
       const first = text.charCodeAt(index);
       if (this.state === S_GROUND && first >= 0x20 && first <= 0x7e) {
+        if (this.sink.printAscii) {
+          index = this.sink.printAscii(text, index, this.attr);
+          continue;
+        }
         const start = index;
         do {
           index += 1;

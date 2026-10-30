@@ -120,6 +120,19 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
         grid.writeAscii(text, currentAttr, start, end);
       }
     },
+    printAscii(text, index, attr) {
+      if (!predictions?.size) {
+        const next = grid.writeAsciiFused(text, index, attr);
+        lastPrinted = text[next - 1]!;
+        return next;
+      }
+      while (index < text.length) {
+        const code = text.charCodeAt(index);
+        if (code < 0x20 || code > 0x7e) break;
+        reconcilePrint(text[index++]!);
+      }
+      return index;
+    },
     lineFeed() {
       grid.lineFeed();
       reconcileCursor();

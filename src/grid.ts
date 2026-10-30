@@ -64,6 +64,8 @@ const CONTINUATION = 0;
 
 export class Row {
   codes: Uint32Array;
+  needsClear = false;
+  clearStart = 0;
   constructor(cols: number) { this.codes = new Uint32Array(cols); this.codes.fill(32); }
 }
 
@@ -220,16 +222,23 @@ export class Grid {
     return attr | ch;
   }
 
-  private isWideAt(row: Row, col: number): boolean { const code = row.codes[col]! & CHAR_MASK; return code > 126 && code !== CONTINUATION && wcwidth(code < 128 ? String.fromCharCode(code) : this.strings[code - 128]!) === 2; }
+  private isWideAt(row: Row, col: number): boolean { const code = row.needsClear && col >= row.clearStart ? 32 : row.codes[col]! & CHAR_MASK; return code > 126 && code !== CONTINUATION && wcwidth(code < 128 ? String.fromCharCode(code) : this.strings[code - 128]!) === 2; }
 
   cellAt(row: Row, col: number): Cell {
+    if (row.needsClear && col >= row.clearStart) return BLANK;
     const code = row.codes[col]!;
     const ch = (code & CHAR_MASK) === CONTINUATION ? '' : (code & CHAR_MASK) < 128 ? String.fromCharCode(code & CHAR_MASK) : this.strings[(code & CHAR_MASK) - 128]!;
     return internCell(ch, this.attrs[code >>> CHAR_BITS]!);
   }
 
-  setCell(row: Row, col: number, cell: Cell): void { row.codes[col] = this.code(cell); }
-  fillRow(row: Row, cell = BLANK): void { row.codes.fill(cell === BLANK ? 32 : this.code(cell)); }
+  private materializeRow(row: Row): void {
+    if (!row.needsClear) return;
+    row.codes.fill(32, row.clearStart);
+    row.needsClear = false;
+  }
+
+  setCell(row: Row, col: number, cell: Cell): void { this.materializeRow(row); row.codes[col] = this.code(cell); }
+  fillRow(row: Row, cell = BLANK): void { row.codes.fill(cell === BLANK ? 32 : this.code(cell)); row.needsClear = false; }
   private cells(row: Row): Cell[] { return Array.from(row.codes, (_, col) => this.cellAt(row, col)); }
   private rowFrom(cells: Cell[]): Row { const row = makeRow(cells.length); for (let i = 0; i < cells.length; i++) this.setCell(row, i, cells[i]!); return row; }
 
@@ -308,6 +317,7 @@ export class Grid {
 
   insertChars(n: number): void {
     const row = this.rowsData[this.cursorRow]!;
+    this.materializeRow(row);
     const col = Math.min(this.cursorCol, this.cols - 1);
     const count = Math.min(Math.max(1, n), this.cols - col);
     row.codes.copyWithin(col + count, col, this.cols - count);
@@ -318,6 +328,7 @@ export class Grid {
 
   deleteChars(n: number): void {
     const row = this.rowsData[this.cursorRow]!;
+    this.materializeRow(row);
     const col = Math.min(this.cursorCol, this.cols - 1);
     const count = Math.min(Math.max(1, n), this.cols - col);
     row.codes.copyWithin(col, col + count);
@@ -431,6 +442,7 @@ export class Grid {
     pushExcess: boolean,
   ): void {
     for (const row of buf) {
+      this.materializeRow(row);
       if (row.codes.length !== cols) {
         const codes = new Uint32Array(cols);
         codes.fill(32);
@@ -451,7 +463,11 @@ export class Grid {
 
   private freshRow(gone: Row | undefined): Row {
     const recycled = gone && this.pushScrollback(gone);
-    if (recycled?.codes.length === this.cols) { this.fillRow(recycled); return recycled; }
+    if (recycled?.codes.length === this.cols) {
+      recycled.needsClear = true;
+      recycled.clearStart = 0;
+      return recycled;
+    }
     return makeRow(this.cols);
   }
 
@@ -491,7 +507,8 @@ export class Grid {
     if (this.pendingWrap) this.wrapToNextLine();
     const row = this.rowsData[this.cursorRow]!;
     const start = this.cursorCol;
-    const startCode = row.codes[start]! & CHAR_MASK;
+    if (row.needsClear && start !== row.clearStart) this.materializeRow(row);
+    const startCode = row.needsClear && start >= row.clearStart ? 32 : row.codes[start]! & CHAR_MASK;
     if (startCode === CONTINUATION || this.isWideAt(row, start)) this.clearCell(row, start);
     let col = start;
     while (col < this.cols && index < text.length) {
@@ -501,7 +518,8 @@ export class Grid {
       index += 1;
     }
     if (col !== start) {
-      if (col < this.cols && (row.codes[col]! & CHAR_MASK) === CONTINUATION) row.codes[col] = 32;
+      if (row.needsClear) row.clearStart = col;
+      if (col < this.cols && (!row.needsClear || col < row.clearStart) && (row.codes[col]! & CHAR_MASK) === CONTINUATION) row.codes[col] = 32;
       this.markRow(this.cursorRow);
       this.cursorCol = Math.min(col, this.cols - 1);
       if (col === this.cols) this.pendingWrap = this.autoWrapMode;
@@ -514,6 +532,7 @@ export class Grid {
     while (index < limit) {
       if (this.pendingWrap) this.wrapToNextLine();
       const row = this.rowsData[this.cursorRow]!;
+      this.materializeRow(row);
       const start = this.cursorCol;
       const end = Math.min(this.cols, start + limit - index);
       const startCode = row.codes[start]! & CHAR_MASK;

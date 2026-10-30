@@ -199,20 +199,28 @@ export class Grid {
 
   private attrIndexes = new Map<CellAttr, number>([[DEFAULT_ATTR, 0]]);
   private attrs: CellAttr[] = [DEFAULT_ATTR];
+  private lastCodeAttr: CellAttr | null = DEFAULT_ATTR;
+  private lastAttrCode = 0;
   private strings: string[] = [];
   private stringIndexes = new Map<string, number>();
 
+  private attrCode(attr: CellAttr): number {
+    if (attr === this.lastCodeAttr) return this.lastAttrCode;
+    let index = this.attrIndexes.get(attr);
+    if (index === undefined) { index = this.attrs.length; this.attrs.push(attr); this.attrIndexes.set(attr, index); }
+    return this.lastAttrCode = index << CHAR_BITS, this.lastCodeAttr = attr, this.lastAttrCode;
+  }
+
   private code(cell: Cell): number {
-    let attr = this.attrIndexes.get(cell.attr);
-    if (attr === undefined) { attr = this.attrs.length; this.attrs.push(cell.attr); this.attrIndexes.set(cell.attr, attr); }
+    const attr = this.attrCode(cell.attr);
     let ch: number;
     if (cell.ch === '') ch = CONTINUATION;
     else if (cell.ch.length === 1 && cell.ch.charCodeAt(0) < 128) ch = cell.ch.charCodeAt(0);
     else { let i = this.stringIndexes.get(cell.ch); if (i === undefined) { i = this.strings.length; this.strings.push(cell.ch); this.stringIndexes.set(cell.ch, i); } ch = 128 + i; }
-    return (attr << CHAR_BITS) | ch;
+    return attr | ch;
   }
 
-  private isWideAt(row: Row, col: number): boolean { const ch = this.cellAt(row, col).ch; return ch > '~' && wcwidth(ch) === 2; }
+  private isWideAt(row: Row, col: number): boolean { const code = row.codes[col]! & CHAR_MASK; return code > 126 && code !== CONTINUATION && wcwidth(code < 128 ? String.fromCharCode(code) : this.strings[code - 128]!) === 2; }
 
   cellAt(row: Row, col: number): Cell {
     const code = row.codes[col]!;
@@ -221,7 +229,7 @@ export class Grid {
   }
 
   setCell(row: Row, col: number, cell: Cell): void { row.codes[col] = this.code(cell); }
-  fillRow(row: Row, cell = BLANK): void { row.codes.fill(this.code(cell)); }
+  fillRow(row: Row, cell = BLANK): void { row.codes.fill(cell === BLANK ? 32 : this.code(cell)); }
   private cells(row: Row): Cell[] { return Array.from(row.codes, (_, col) => this.cellAt(row, col)); }
   private rowFrom(cells: Cell[]): Row { const row = makeRow(cells.length); for (let i = 0; i < cells.length; i++) this.setCell(row, i, cells[i]!); return row; }
 
@@ -303,7 +311,7 @@ export class Grid {
     const col = Math.min(this.cursorCol, this.cols - 1);
     const count = Math.min(Math.max(1, n), this.cols - col);
     row.codes.copyWithin(col + count, col, this.cols - count);
-    row.codes.fill(this.code(BLANK), col, col + count);
+    row.codes.fill(32, col, col + count);
     this.normalizeRow(row);
     this.markRow(this.cursorRow);
   }
@@ -313,7 +321,7 @@ export class Grid {
     const col = Math.min(this.cursorCol, this.cols - 1);
     const count = Math.min(Math.max(1, n), this.cols - col);
     row.codes.copyWithin(col, col + count);
-    row.codes.fill(this.code(BLANK), this.cols - count);
+    row.codes.fill(32, this.cols - count);
     this.normalizeRow(row);
     this.markRow(this.cursorRow);
   }
@@ -425,7 +433,7 @@ export class Grid {
     for (const row of buf) {
       if (row.codes.length !== cols) {
         const codes = new Uint32Array(cols);
-        codes.fill(this.code(BLANK));
+        codes.fill(32);
         codes.set(row.codes.subarray(0, cols));
         row.codes = codes;
       }
@@ -479,16 +487,17 @@ export class Grid {
   }
 
   writeAscii(text: string, attr: CellAttr): void {
-    const attrCode = this.code({ ch: ' ', attr }) & ~CHAR_MASK;
+    const attrCode = this.attrCode(attr);
     let index = 0;
     while (index < text.length) {
       if (this.pendingWrap) this.wrapToNextLine();
       const row = this.rowsData[this.cursorRow]!;
       const start = this.cursorCol;
       const end = Math.min(this.cols, start + text.length - index);
-      if (this.cellAt(row, start).ch === '' || this.isWideAt(row, start)) this.clearCell(row, start);
-      if (end < this.cols && this.cellAt(row, end).ch === '') this.setCell(row, end, BLANK);
-      for (let col = start; col < end; col++, index++) { const ch = text[index]!; const code = ch.charCodeAt(0); if (code < 128) row.codes[col] = attrCode | code; else this.setCell(row, col, internCell(ch, attr)); }
+      const startCode = row.codes[start]! & CHAR_MASK;
+      if (startCode === CONTINUATION || this.isWideAt(row, start)) this.clearCell(row, start);
+      if (end < this.cols && (row.codes[end]! & CHAR_MASK) === CONTINUATION) row.codes[end] = 32;
+      for (let col = start; col < end; col++, index++) { const code = text.charCodeAt(index); if (code < 128) row.codes[col] = attrCode | code; else this.setCell(row, col, internCell(String.fromCharCode(code), attr)); }
       this.markRow(this.cursorRow);
       this.cursorCol = Math.min(end, this.cols - 1);
       if (end === this.cols) {

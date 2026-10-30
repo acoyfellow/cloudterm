@@ -486,14 +486,13 @@ export class Grid {
     });
   }
 
-  writeAscii(text: string, attr: CellAttr): void {
+  writeAscii(text: string, attr: CellAttr, index = 0, limit = text.length): void {
     const attrCode = this.attrCode(attr);
-    let index = 0;
-    while (index < text.length) {
+    while (index < limit) {
       if (this.pendingWrap) this.wrapToNextLine();
       const row = this.rowsData[this.cursorRow]!;
       const start = this.cursorCol;
-      const end = Math.min(this.cols, start + text.length - index);
+      const end = Math.min(this.cols, start + limit - index);
       const startCode = row.codes[start]! & CHAR_MASK;
       if (startCode === CONTINUATION || this.isWideAt(row, start)) this.clearCell(row, start);
       if (end < this.cols && (row.codes[end]! & CHAR_MASK) === CONTINUATION) row.codes[end] = 32;
@@ -502,8 +501,8 @@ export class Grid {
       this.cursorCol = Math.min(end, this.cols - 1);
       if (end === this.cols) {
         this.pendingWrap = this.autoWrapMode;
-        if (!this.autoWrapMode && index < text.length) {
-          const ch = text[text.length - 1]!;
+        if (!this.autoWrapMode && index < limit) {
+          const ch = text[limit - 1]!;
           if (ch.charCodeAt(0) < 128) row.codes[end - 1] = attrCode | ch.charCodeAt(0);
           else this.setCell(row, end - 1, internCell(ch, attr));
           return;

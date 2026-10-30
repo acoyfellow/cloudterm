@@ -66,6 +66,10 @@ export function createHeadless(
       lastPrinted = text[text.length - 1]!;
       grid.writeAscii(text, currentAttr);
     },
+    printRunRange(text, start, end) {
+      lastPrinted = text[end - 1]!;
+      grid.writeAscii(text, currentAttr, start, end);
+    },
     lineFeed() {
       grid.lineFeed();
     },

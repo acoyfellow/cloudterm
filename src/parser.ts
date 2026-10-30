@@ -62,6 +62,7 @@ function quickSgr(current: CellAttr, code: number): CellAttr | null {
 export interface ParserSink {
   print(ch: string): void;
   printRun?(text: string): void;
+  printRunRange?(text: string, start: number, end: number): void;
   lineFeed(): void;
   carriageReturn(): void;
   backspace(): void;
@@ -190,9 +191,9 @@ export class AnsiParser {
         do {
           index += 1;
         } while (index < text.length && text.charCodeAt(index) >= 0x20 && text.charCodeAt(index) <= 0x7e);
-        const run = text.slice(start, index);
-        if (this.sink.printRun) this.sink.printRun(run);
-        else for (const ch of run) this.sink.print(ch);
+        if (this.sink.printRunRange) this.sink.printRunRange(text, start, index);
+        else if (this.sink.printRun) this.sink.printRun(text.slice(start, index));
+        else for (let i = start; i < index; i++) this.sink.print(text[i]!);
         continue;
       }
       if (first >= 0xd800 && first <= 0xdbff) {

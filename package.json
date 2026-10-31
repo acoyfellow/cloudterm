@@ -1,6 +1,6 @@
 {
   "name": "cloudterm",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "Tiny DOM-rendered terminal emulator for the web.",
   "author": "Jordan Coeyman <jordan@coey.dev>",
   "license": "MIT",
@@ -55,7 +55,7 @@
     "fuzz": "bun test/fuzz-equivalence.ts"
   },
   "sizeBudget": {
-    "dist/index.js": 14336
+    "dist/index.js": 15360
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.5"

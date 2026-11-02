@@ -23,7 +23,7 @@
 
 import { prepare, layout } from '@chenglou/pretext';
 import type { CellAttr } from './parser.js';
-import type { Cell } from './grid.js';
+import type { RenderLine } from './grid.js';
 import { Grid } from './grid.js';
 import { wcwidth } from './wcwidth.js';
 import type { PredictionBuffer } from './predict.js';
@@ -83,22 +83,6 @@ function colorOf(n: number, fallback: string): string {
   return fallback;
 }
 
-// Compare two attrs for run-grouping equality. A shared reference (fast path)
-// is a definite equal; otherwise compare fields. Parser hands the same attr
-// object for every cell between SGR changes, so identity check wins on
-// typical shell output.
-function attrEq(a: CellAttr, b: CellAttr): boolean {
-  if (a === b) return true;
-  return (
-    a.fg === b.fg &&
-    a.bg === b.bg &&
-    a.bold === b.bold &&
-    a.italic === b.italic &&
-    a.underline === b.underline &&
-    a.reverse === b.reverse &&
-    a.link === b.link
-  );
-}
 
 function safeLink(value: string | undefined): string | undefined {
   if (!value) return undefined;
@@ -110,13 +94,6 @@ function safeLink(value: string | undefined): string | undefined {
   }
 }
 
-function isTransparentBlank({ ch, attr }: Cell): boolean {
-  return (!ch || ch === ' ') && attr.bg < 0 && !attr.reverse && !attr.underline && !attr.link;
-}
-
-function isWideCell(line: Cell[], index: number): boolean {
-  return index + 1 < line.length && line[index + 1]!.ch === '';
-}
 
 export class DomRenderer {
   host: HTMLElement;
@@ -141,6 +118,10 @@ export class DomRenderer {
   private linePool: HTMLDivElement[] = [];
   private overscan: number | null = null;
   private hadPredictions = false;
+  private runState = new WeakMap<HTMLElement, { key: string; text: string }>();
+  private styles = new Map<string, string>();
+  private attrIds = new WeakMap<CellAttr, number>();
+  private nextAttrId = 0;
 
   // Optional speculative-echo overlay. When set, paint() rebuilds the overlay
   // layer from this buffer on every frame. Items are small (0-5 typical).
@@ -283,7 +264,7 @@ export class DomRenderer {
       if (existing) {
         existing.style.top = `${(i - this.grid.trimmed) * this.lineHeight}px`;
         if (mustRebuild) {
-          this.renderLineInto(existing, this.grid.getLine(i));
+          this.renderLineInto(existing, this.grid.renderLine(i));
         }
         continue;
       }
@@ -291,7 +272,7 @@ export class DomRenderer {
       div.className = 'cloudterm-line';
       div.style.top = `${(i - this.grid.trimmed) * this.lineHeight}px`;
       div.style.height = `${this.lineHeight}px`;
-      this.renderLineInto(div, this.grid.getLine(i));
+      this.renderLineInto(div, this.grid.renderLine(i));
       this.surface.appendChild(div);
       this.rendered.set(i, div);
     }
@@ -383,30 +364,40 @@ export class DomRenderer {
     }
   }
 
-  private renderLineInto(div: HTMLDivElement, line: Cell[]): void {
-    const runs: Array<{ text: string; attr: CellAttr; width: number }> = [];
-    let end = line.length;
-    while (end > 0 && isTransparentBlank(line[end - 1]!)) end--;
-    let runAttr: CellAttr | null = null;
+  private renderLineInto(div: HTMLDivElement, line: RenderLine): void {
+    const codes = line.codes;
+    const charMask = 0x1fffff;
+    let end = codes.length;
+    while (end > 0) {
+      const code = line.needsClear && end - 1 >= line.clearStart ? 32 : codes[end - 1]!;
+      const ch = code & charMask;
+      const attr = line.attrs[code >>> 21]!;
+      if ((ch === 0 || ch === 32) && attr.bg < 0 && !attr.reverse && !attr.underline && !attr.link) end--;
+      else break;
+    }
+    const runs: Array<{ text: string; attr: CellAttr; attrId: number; width: number }> = [];
+    let runAttrId = -1;
     let runBuf = '';
     const flush = (): void => {
-      if (runAttr && runBuf) runs.push({ text: runBuf, attr: runAttr, width: 1 });
-      runAttr = null;
+      if (runBuf) runs.push({ text: runBuf, attr: line.attrs[runAttrId]!, attrId: runAttrId, width: 1 });
+      runAttrId = -1;
       runBuf = '';
     };
     for (let i = 0; i < end; i++) {
-      const cell = line[i]!;
-      if (cell.ch === '') continue;
-      if (wcwidth(cell.ch) === 2 && isWideCell(line, i)) {
+      const code = line.needsClear && i >= line.clearStart ? 32 : codes[i]!;
+      const charCode = code & charMask;
+      if (charCode === 0) continue;
+      const attrId = code >>> 21;
+      const ch = charCode < 128 ? String.fromCharCode(charCode) : line.strings[charCode - 128]!;
+      const next = i + 1 < codes.length && !(line.needsClear && i + 1 >= line.clearStart) ? codes[i + 1]! & charMask : 32;
+      if (wcwidth(ch) === 2 && next === 0) {
         flush();
-        runs.push({ text: cell.ch, attr: cell.attr, width: 2 });
-        continue;
-      }
-      if (runAttr && attrEq(cell.attr, runAttr)) runBuf += cell.ch;
+        runs.push({ text: ch, attr: line.attrs[attrId]!, attrId, width: 2 });
+      } else if (attrId === runAttrId) runBuf += ch;
       else {
         flush();
-        runAttr = cell.attr;
-        runBuf = cell.ch;
+        runAttrId = attrId;
+        runBuf = ch;
       }
     }
     flush();
@@ -417,13 +408,13 @@ export class DomRenderer {
       const existing = div.children[index] as HTMLElement | undefined;
       const element = existing?.tagName === tagName ? existing : document.createElement(tagName.toLowerCase());
       if (existing && existing !== element) existing.replaceWith(element);
-      this.emitRun(element, run.text, run.attr, run.width, link);
+      this.emitRun(element, run.text, run.attr, run.width, link, run.attrId);
       if (!element.parentElement) div.appendChild(element);
     }
     while (div.children.length > runs.length) div.lastElementChild!.remove();
   }
 
-  private emitRun(element: HTMLElement, text: string, attr: CellAttr, width = 1, link = safeLink(attr.link)): void {
+  private emitRun(element: HTMLElement, text: string, attr: CellAttr, width = 1, link = safeLink(attr.link), attrId = -1): void {
     let fg = attr.fg;
     let bg = attr.bg;
     if (attr.reverse) {
@@ -433,22 +424,42 @@ export class DomRenderer {
       if (fg < 0) fg = 15;
       if (bg < 0) bg = 0;
     }
-    const fgColor = colorOf(fg, 'var(--ct-fg)');
-    const bgColor = colorOf(bg, attr.reverse ? 'var(--ct-fg)' : 'transparent');
-    const style = `color:${fgColor === 'var(--ct-fg)' ? '' : fgColor};background:${bgColor === 'transparent' ? '' : bgColor};font-weight:${attr.bold ? 'bold' : ''};font-style:${attr.italic ? 'italic' : ''};text-decoration:${attr.underline ? 'underline' : ''};${width === 2 ? `display:inline-block;width:${this.charWidth * 2}px;` : ''}`;
-    if (element.getAttribute('style') !== style) element.setAttribute('style', style);
-    if (link) {
-      element.className = 'cloudterm-link';
-      element.setAttribute('href', link);
-      element.setAttribute('target', '_blank');
-      element.setAttribute('rel', 'noopener noreferrer');
-    } else {
-      element.className = '';
-      element.removeAttribute('href');
-      element.removeAttribute('target');
-      element.removeAttribute('rel');
+    let styleId = `g${attrId}`;
+    if (attrId < 0) {
+      let id = this.attrIds.get(attr);
+      if (id === undefined) {
+        id = this.nextAttrId++;
+        this.attrIds.set(attr, id);
+      }
+      styleId = `d${id}`;
     }
-    if (element.textContent !== text) element.textContent = text;
+    const key = `${styleId}:${width}:${this.charWidth}`;
+    const state = this.runState.get(element);
+    if (!state || state.key !== key) {
+      let style = this.styles.get(key);
+      if (!style) {
+        const fgColor = colorOf(fg, 'var(--ct-fg)');
+        const bgColor = colorOf(bg, attr.reverse ? 'var(--ct-fg)' : 'transparent');
+        style = `color:${fgColor === 'var(--ct-fg)' ? '' : fgColor};background:${bgColor === 'transparent' ? '' : bgColor};font-weight:${attr.bold ? 'bold' : ''};font-style:${attr.italic ? 'italic' : ''};text-decoration:${attr.underline ? 'underline' : ''};${width === 2 ? `display:inline-block;width:${this.charWidth * 2}px;` : ''}`;
+        this.styles.set(key, style);
+      }
+      element.setAttribute('style', style);
+      if (link) {
+        element.className = 'cloudterm-link';
+        element.setAttribute('href', link);
+        element.setAttribute('target', '_blank');
+        element.setAttribute('rel', 'noopener noreferrer');
+      } else {
+        element.className = '';
+        if (state) {
+          element.removeAttribute('href');
+          element.removeAttribute('target');
+          element.removeAttribute('rel');
+        }
+      }
+    }
+    if (!state || state.text !== text) element.textContent = text;
+    this.runState.set(element, { key, text });
   }
 
   scrollToLine(line: number): void {

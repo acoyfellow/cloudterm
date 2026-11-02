@@ -86,6 +86,14 @@ export interface DirtyState {
   dirtyLines: Set<number>;
 }
 
+export interface RenderLine {
+  codes: Uint32Array;
+  needsClear: boolean;
+  clearStart: number;
+  attrs: readonly CellAttr[];
+  strings: readonly string[];
+}
+
 interface SerializedSnapshot {
   v: 1;
   cols: number;
@@ -749,6 +757,15 @@ export class Grid {
     if (relative >= 0 && relative < this.scrollback.length) return this.cells(this.scrollback.get(relative)!);
     const r = this.rowsData[relative - this.scrollback.length];
     return r ? this.cells(r) : this.cells(makeRow(this.cols));
+  }
+
+  renderLine(index: number): RenderLine {
+    const relative = index - this.trimmed;
+    const row = relative >= 0 && relative < this.scrollback.length
+      ? this.scrollback.get(relative)
+      : this.rowsData[relative - this.scrollback.length];
+    const source = row ?? makeRow(this.cols);
+    return { codes: source.codes, needsClear: source.needsClear, clearStart: source.clearStart, attrs: this.attrs, strings: this.strings };
   }
 
   clearScrollback(): void {

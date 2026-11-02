@@ -198,7 +198,7 @@ export class Grid {
     this.scrollBottom = this.rows - 1;
   }
 
-  private attrIndexes = new Map<CellAttr, number>([[DEFAULT_ATTR, 0]]);
+  private attrIndexes = new WeakMap<CellAttr, number>([[DEFAULT_ATTR, 0]]);
   private attrs: CellAttr[] = [DEFAULT_ATTR];
   private lastCodeAttr: CellAttr | null = DEFAULT_ATTR;
   private lastAttrCode = 0;

@@ -187,6 +187,34 @@ export class AnsiParser {
     }
     while (index < text.length) {
       const first = text.charCodeAt(index);
+      if (this.state === S_GROUND && first === 0x1b && text.charCodeAt(index + 1) === 0x5b && this.attr.link === undefined) {
+        let end = index + 2;
+        let code = -1;
+        let next: CellAttr | null = this.attr;
+        while (end < text.length) {
+          const part = text.charCodeAt(end);
+          if (part >= 0x30 && part <= 0x39) {
+            code = (code < 0 ? 0 : code) * 10 + part - 0x30;
+            end++;
+            continue;
+          }
+          if (part === 0x3b) {
+            next = code < 0 ? DEFAULT_ATTR : next && quickSgr(next, code);
+            code = -1;
+            end++;
+            continue;
+          }
+          break;
+        }
+        if (text.charCodeAt(end) === 0x6d) {
+          next = code < 0 ? DEFAULT_ATTR : next && quickSgr(next, code);
+          if (next) {
+            this.sink.setAttr((this.attr = next));
+            index = end + 1;
+            continue;
+          }
+        }
+      }
       if (this.state === S_GROUND && first >= 0x20 && first <= 0x7e) {
         if (this.sink.printAscii) {
           index = this.sink.printAscii(text, index, this.attr);

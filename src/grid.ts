@@ -183,7 +183,6 @@ export class Grid {
 
   dirty = true;
   dirtyAll = true;
-  dirtyLines = new Set<number>();
   private dirtyRows: Uint32Array;
   private tick = 1;
   private skip = false;
@@ -359,10 +358,7 @@ export class Grid {
 
   private markRow(screenRow: number): void {
     if (screenRow < 0 || screenRow >= this.rows) return;
-    if (!this.skip && this.dirtyRows[screenRow] !== this.tick) {
-      this.dirtyRows[screenRow] = this.tick;
-      this.dirtyLines.add(this.absOf(screenRow));
-    }
+    if (!this.skip) this.dirtyRows[screenRow] = this.tick;
     this.dirty = true;
   }
 
@@ -370,14 +366,8 @@ export class Grid {
     for (let r = Math.max(0, rStart); r <= rEnd; r++) this.markRow(r);
   }
 
-  private pruneDirty(): void {
-    const top = this.absOf(0);
-    for (const line of this.dirtyLines) if (line < top) this.dirtyLines.delete(line);
-  }
-
   private markAllVisible(): void {
     this.dirtyAll = true;
-    this.dirtyLines.clear();
     this.skip = true;
     this.dirty = true;
   }
@@ -398,9 +388,13 @@ export class Grid {
   }
 
   consumeDirty(): DirtyState {
-    const state: DirtyState = { dirtyAll: this.dirtyAll, dirtyLines: this.dirtyLines };
+    const dirtyLines = new Set<number>();
+    const top = this.absOf(0);
+    for (let row = 0; row < this.rows; row++) {
+      if (this.dirtyRows[row] === this.tick) dirtyLines.add(top + row);
+    }
+    const state: DirtyState = { dirtyAll: this.dirtyAll, dirtyLines };
     this.dirtyAll = false;
-    this.dirtyLines = new Set<number>();
     this.skip = false;
     this.dirty = false;
     this.tick += 1;
@@ -652,7 +646,6 @@ export class Grid {
       // New bottom row's absolute index is the one the cursor is on now.
       this.dirtyRows.copyWithin(0, 1);
       this.dirtyRows[this.rows - 1] = 0;
-      if (this.dirtyLines.size > this.rows * 2) this.pruneDirty();
       this.markRow(this.cursorRow);
     }
     this.dirty = true;

@@ -216,6 +216,12 @@ export function createHeadless(
     setCurrentDirectory(uri) {
       cwds.push(uri);
     },
+    setTabStop() {
+      grid.setTabStop();
+    },
+    clearTabStop(mode) {
+      grid.clearTabStop(mode);
+    },
     primaryDeviceAttributes() {
       replyFn?.('\x1b[?1;2c');
     },

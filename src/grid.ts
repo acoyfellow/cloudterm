@@ -66,6 +66,7 @@ export class Row {
   codes: Uint32Array;
   needsClear = false;
   clearStart = 0;
+  wrapped = false;
   constructor(cols: number) { this.codes = new Uint32Array(cols); this.codes.fill(32); }
 }
 
@@ -192,6 +193,7 @@ export class Grid {
   dirty = true;
   dirtyAll = true;
   private dirtyRows: Uint32Array;
+  private tabStops: Uint8Array;
   private tick = 1;
   private skip = false;
 
@@ -203,7 +205,14 @@ export class Grid {
     this.rowsData = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.altScreen = Array.from({ length: this.rows }, () => makeRow(this.cols));
     this.dirtyRows = new Uint32Array(this.rows);
+    this.tabStops = this.makeDefaultTabStops(this.cols);
     this.scrollBottom = this.rows - 1;
+  }
+
+  private makeDefaultTabStops(cols: number): Uint8Array {
+    const stops = new Uint8Array(cols);
+    for (let c = 8; c < cols; c += 8) stops[c] = 1;
+    return stops;
   }
 
   private attrIndexes = new WeakMap<CellAttr, number>([[DEFAULT_ATTR, 0]]);
@@ -419,12 +428,23 @@ export class Grid {
     rows = Math.max(1, rows);
     if (cols === this.cols && rows === this.rows) return;
 
-    // Resize whichever buffer is currently active.
-    this.resizeBuffer(this.rowsData, cols, rows, true);
-    // Resize the inactive buffer too, so a later swap sees correct shape.
-    // No scrollback push for the inactive buffer.
+    if (cols !== this.tabStops.length) {
+      const nextStops = new Uint8Array(cols);
+      const copyLen = Math.min(this.tabStops.length, cols);
+      nextStops.set(this.tabStops.subarray(0, copyLen));
+      for (let c = Math.ceil(copyLen / 8) * 8; c < cols; c += 8) {
+        if (c > 0) nextStops[c] = 1;
+      }
+      this.tabStops = nextStops;
+    }
+
+    if (!this.inAltScreen && cols !== this.cols) {
+      this.reflowMain(cols, rows);
+    } else {
+      this.resizeBuffer(this.rowsData, cols, rows, true);
+    }
     const inactive = this.inAltScreen ? this.mainScreen : this.altScreen;
-    if (inactive.length) this.resizeBuffer(inactive, cols, rows, /*pushExcess*/ false);
+    if (inactive.length) this.resizeBuffer(inactive, cols, rows, false);
 
     this.cols = cols;
     this.rows = rows;
@@ -435,6 +455,127 @@ export class Grid {
     if (this.cursorRow >= rows) this.cursorRow = rows - 1;
     if (this.cursorCol >= cols) this.cursorCol = cols - 1;
     this.markAllVisible();
+  }
+
+  private trimmedRowLen(row: Row): number {
+    this.materializeRow(row);
+    let end = row.codes.length;
+    while (end > 0 && row.codes[end - 1] === 32) end--;
+    return end;
+  }
+
+  private reflowMain(cols: number, rows: number): void {
+    const sbLen = this.scrollback.length;
+    const cursorAbs = sbLen + this.cursorRow;
+    let lastUsedScreen = this.cursorRow;
+    for (let r = this.rowsData.length - 1; r > lastUsedScreen; r--) {
+      if (this.trimmedRowLen(this.rowsData[r]!) > 0) {
+        lastUsedScreen = r;
+        break;
+      }
+    }
+    const sourceCount = sbLen + lastUsedScreen + 1;
+    const source = new Array<Row>(sourceCount);
+    for (let i = 0; i < sbLen; i++) source[i] = this.scrollback.get(i)!;
+    for (let r = 0; r <= lastUsedScreen; r++) source[sbLen + r] = this.rowsData[r]!;
+
+    const out: Row[] = [];
+    let scratch = new Uint32Array(Math.max(cols * 4, 512));
+    let newCursorAbs = 0;
+    let newCursorCol = 0;
+    let idx = 0;
+    while (idx < sourceCount) {
+      let groupEnd = idx + 1;
+      while (groupEnd < sourceCount && source[groupEnd]!.wrapped) groupEnd++;
+      const hasCursor = cursorAbs >= idx && cursorAbs < groupEnd;
+      let logicalCursor = 0;
+      let totalCells = 0;
+      for (let g = idx; g < groupEnd; g++) {
+        const r = source[g]!;
+        this.materializeRow(r);
+        const isLast = g === groupEnd - 1;
+        let len = isLast ? this.trimmedRowLen(r) : r.codes.length;
+        if (hasCursor && g === cursorAbs) {
+          logicalCursor = totalCells + this.cursorCol;
+          if (isLast && this.cursorCol > len) len = this.cursorCol;
+        }
+        totalCells += len;
+      }
+
+      if (totalCells === 0) {
+        const blank = makeRow(cols);
+        if (hasCursor) {
+          newCursorAbs = out.length;
+          newCursorCol = 0;
+        }
+        out.push(blank);
+        idx = groupEnd;
+        continue;
+      }
+
+      if (groupEnd - idx === 1 && totalCells <= cols) {
+        const orig = source[idx]!;
+        const nextRow = makeRow(cols);
+        nextRow.codes.set(orig.codes.subarray(0, totalCells));
+        if (hasCursor) {
+          newCursorAbs = out.length;
+          newCursorCol = Math.min(cols - 1, logicalCursor);
+        }
+        out.push(nextRow);
+        idx = groupEnd;
+        continue;
+      }
+
+      if (scratch.length < totalCells) scratch = new Uint32Array(totalCells * 2);
+      const flat = scratch;
+      let pos = 0;
+      for (let g = idx; g < groupEnd; g++) {
+        const r = source[g]!;
+        const take = Math.min(r.codes.length, totalCells - pos);
+        flat.set(r.codes.subarray(0, take), pos);
+        pos += take;
+      }
+
+      let offset = 0;
+      let firstChunk = true;
+      let cursorPlaced = false;
+      while (offset < totalCells) {
+        const nextRow = makeRow(cols);
+        nextRow.wrapped = !firstChunk;
+        firstChunk = false;
+        let chunkLen = Math.min(cols, totalCells - offset);
+        if (chunkLen === cols && offset + chunkLen < totalCells && (flat[offset + chunkLen]! & CHAR_MASK) === CONTINUATION) {
+          chunkLen = Math.max(1, chunkLen - 1);
+        }
+        nextRow.codes.set(flat.subarray(offset, offset + chunkLen));
+        if (hasCursor && !cursorPlaced && logicalCursor >= offset && (logicalCursor < offset + chunkLen || offset + chunkLen === totalCells)) {
+          newCursorAbs = out.length;
+          newCursorCol = Math.min(cols - 1, logicalCursor - offset);
+          cursorPlaced = true;
+        }
+        out.push(nextRow);
+        offset += chunkLen;
+      }
+      if (hasCursor && !cursorPlaced) {
+        newCursorAbs = out.length - 1;
+        newCursorCol = Math.min(cols - 1, totalCells % cols);
+      }
+      idx = groupEnd;
+    }
+
+    const screenStart = Math.max(0, out.length - rows);
+    const nextSb = new RingBuffer<Row>(this.maxScrollback);
+    let evicted = 0;
+    for (let i = 0; i < screenStart; i++) {
+      if (nextSb.push(out[i]!)) evicted++;
+    }
+    this.scrollback = nextSb;
+    this.trimmed += evicted;
+    const nextScreen = out.slice(screenStart);
+    while (nextScreen.length < rows) nextScreen.push(makeRow(cols));
+    this.rowsData = nextScreen;
+    this.cursorRow = Math.min(rows - 1, Math.max(0, newCursorAbs - screenStart));
+    this.cursorCol = Math.min(cols - 1, Math.max(0, newCursorCol));
   }
 
   private resizeBuffer(
@@ -468,6 +609,7 @@ export class Grid {
     if (recycled?.codes.length === this.cols) {
       recycled.needsClear = true;
       recycled.clearStart = 0;
+      recycled.wrapped = false;
       return recycled;
     }
     return makeRow(this.cols);
@@ -623,6 +765,8 @@ export class Grid {
     this.pendingWrap = false;
     this.cursorCol = 0;
     this.lineFeed();
+    const row = this.rowsData[this.cursorRow];
+    if (row) row.wrapped = true;
   }
 
   carriageReturn(): void {
@@ -668,11 +812,31 @@ export class Grid {
     }
   }
 
+  setTabStop(): void {
+    if (this.cursorCol >= 0 && this.cursorCol < this.tabStops.length) {
+      this.tabStops[this.cursorCol] = 1;
+    }
+  }
+
+  clearTabStop(mode: number): void {
+    if (mode === 3) {
+      this.tabStops.fill(0);
+    } else if (mode === 0 && this.cursorCol >= 0 && this.cursorCol < this.tabStops.length) {
+      this.tabStops[this.cursorCol] = 0;
+    }
+  }
+
   tab(): void {
     this.clearPendingWrap();
     if (this.cursorCol >= this.cols) this.cursorCol = this.cols - 1;
-    const next = (Math.floor(this.cursorCol / 8) + 1) * 8;
-    this.cursorCol = Math.min(this.cols - 1, next);
+    let next = this.cols - 1;
+    for (let c = this.cursorCol + 1; c < this.cols; c++) {
+      if (this.tabStops[c]) {
+        next = c;
+        break;
+      }
+    }
+    this.cursorCol = next;
     this.markRow(this.cursorRow);
   }
 

@@ -120,6 +120,9 @@ export interface ParserSink {
   // title, a breadcrumb, or to spawn new tabs in the same cwd.
   setCurrentDirectory(uri: string): void;
   clipboard?(text: string, selection: string): void;
+  setTabStop?(): void;
+  clearTabStop?(mode: number): void;
+  setSynchronizedOutput?(enabled: boolean): void;
   primaryDeviceAttributes?(): void;
   secondaryDeviceAttributes?(): void;
   tertiaryDeviceAttributes?(): void;
@@ -139,12 +142,16 @@ const S_IGNORED_CONTROL_STRING = 6;
 const S_IGNORED_CONTROL_STRING_ESC = 7;
 type S = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
+const DEC_LINE_DRAWING = ' ◆▒␉␌␍␊°±␤␋┘┐┌└┼⎺⎻─⎼⎽├┤┴┬│≤≥π≠£·';
+
 export class AnsiParser {
   private state: S = S_GROUND;
   private params: number[] = [];
   private currentParam = -1; // -1 means "empty"
   private intermediate = '';
   private oscBuf = '';
+  private charsetDesignating = false;
+  private g0LineDrawing = false;
   private attr: CellAttr = DEFAULT_ATTR;
   // Streaming UTF-8 decoder. Buffers partial multi-byte sequences across
   // calls internally, so chunk boundaries in the middle of a codepoint
@@ -160,6 +167,8 @@ export class AnsiParser {
     this.currentParam = -1;
     this.intermediate = '';
     this.oscBuf = '';
+    this.charsetDesignating = false;
+    this.g0LineDrawing = false;
     // Flush the streaming decoder so any buffered partial bytes are
     // dropped on reset.
     this.utf8Decoder.decode();
@@ -221,7 +230,7 @@ export class AnsiParser {
           }
         }
       }
-      if (this.state === S_GROUND && first >= 0x20 && first <= 0x7e) {
+      if (this.state === S_GROUND && !this.g0LineDrawing && first >= 0x20 && first <= 0x7e) {
         if (this.sink.printAscii) {
           index = this.sink.printAscii(text, index, this.attr);
           continue;
@@ -270,6 +279,10 @@ export class AnsiParser {
         this.osc(ch, code);
         return;
       case S_ESC_AWAITING_CHARSET_FINAL:
+        if (this.charsetDesignating) {
+          this.g0LineDrawing = ch === '0';
+          this.charsetDesignating = false;
+        }
         this.state = S_GROUND;
         return;
       case S_OSC_ESC:
@@ -324,6 +337,10 @@ export class AnsiParser {
           return; // ignore other C0
       }
     }
+    if (this.g0LineDrawing && code >= 0x5f && code <= 0x7e) {
+      this.sink.print(DEC_LINE_DRAWING[code - 0x5f]!);
+      return;
+    }
     this.sink.print(ch);
   }
 
@@ -341,6 +358,7 @@ export class AnsiParser {
       return;
     }
     if (code >= 0x20 && code <= 0x2f) {
+      this.charsetDesignating = ch === '(';
       this.state = S_ESC_AWAITING_CHARSET_FINAL;
       return;
     }
@@ -349,6 +367,7 @@ export class AnsiParser {
       return;
     }
     if (ch === 'N' || ch === 'O') {
+      this.charsetDesignating = false;
       this.state = S_ESC_AWAITING_CHARSET_FINAL;
       return;
     }
@@ -365,6 +384,9 @@ export class AnsiParser {
       case 'E':
         this.sink.carriageReturn();
         this.sink.lineFeed();
+        break;
+      case 'H':
+        this.sink.setTabStop?.();
         break;
       case 'M':
         this.sink.reverseIndex();
@@ -573,6 +595,9 @@ export class AnsiParser {
       case 'b':
         this.sink.repeatLast(this.p(0, 1));
         return;
+      case 'g':
+        if (!isPrivate) this.sink.clearTabStop?.(this.p(0, 0));
+        return;
       case 'm':
         if (!isPrivate) this.handleSgr();
         return;
@@ -626,6 +651,8 @@ export class AnsiParser {
             this.sink.setMouseTracking(enabled ? ps : 0);
           } else if (ps === 1006) {
             this.sink.setMouseSgr(enabled);
+          } else if (ps === 2026) {
+            this.sink.setSynchronizedOutput?.(enabled);
           }
         }
         return;

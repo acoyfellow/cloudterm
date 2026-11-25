@@ -304,6 +304,28 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     clipboard(text, selection) {
       opts.onClipboard?.(text, selection);
     },
+    setTabStop() {
+      grid.setTabStop();
+    },
+    clearTabStop(mode) {
+      grid.clearTabStop(mode);
+    },
+    setSynchronizedOutput(enabled) {
+      syncOutput = enabled;
+      if (syncTimer !== null) {
+        clearTimeout(syncTimer);
+        syncTimer = null;
+      }
+      if (enabled) {
+        syncTimer = setTimeout(() => {
+          syncTimer = null;
+          syncOutput = false;
+          if (!destroyed && grid.dirty) schedulePaint();
+        }, 200);
+      } else if (grid.dirty) {
+        schedulePaint();
+      }
+    },
     primaryDeviceAttributes() {
       reply('\x1b[?1;2c');
     },
@@ -435,24 +457,29 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   let rafForce = false;
   let microPending = false;
   let microForce = false;
+  let syncOutput = false;
+  let syncTimer: ReturnType<typeof setTimeout> | null = null;
   function scheduleImmediatePaint(force = false): void {
+    if (syncOutput) return;
     if (force) microForce = true;
     if (microPending || rafPending) return;
     microPending = true;
     queueMicrotask(() => {
       microPending = false;
-      if (destroyed) return;
+      if (destroyed || syncOutput) return;
       const mustPaint = grid.dirty || microForce;
       microForce = false;
       if (mustPaint) renderer.paint();
     });
   }
   function schedulePaint(force = false): void {
+    if (syncOutput) return;
     if (force) rafForce = true;
     if (rafPending) return;
     rafPending = true;
     requestAnimationFrame(() => {
       rafPending = false;
+      if (syncOutput) return;
       const mustPaint = grid.dirty || rafForce;
       rafForce = false;
       if (mustPaint) renderer.paint();
@@ -614,6 +641,10 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     },
     destroy() {
       destroyed = true;
+      if (syncTimer !== null) {
+        clearTimeout(syncTimer);
+        syncTimer = null;
+      }
       if (predictSweepTimer !== null) {
         clearTimeout(predictSweepTimer);
         predictSweepTimer = null;

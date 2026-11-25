@@ -404,7 +404,7 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
               col: Math.min(grid.cols - 1, col + 1),
               at: now,
             });
-            schedulePaint(true);
+            scheduleImmediatePaint(true);
             schedulePredictSweep();
           } else if (ev.kind === 'backspace') {
             if (col <= 0) return; // at BOL: shell may or may not move us.
@@ -421,7 +421,7 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
               ch: ' ',
               at: now,
             });
-            schedulePaint(true);
+            scheduleImmediatePaint(true);
             schedulePredictSweep();
           }
         }
@@ -433,6 +433,20 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   // authoritative grid did not mutate.
   let rafPending = false;
   let rafForce = false;
+  let microPending = false;
+  let microForce = false;
+  function scheduleImmediatePaint(force = false): void {
+    if (force) microForce = true;
+    if (microPending || rafPending) return;
+    microPending = true;
+    queueMicrotask(() => {
+      microPending = false;
+      if (destroyed) return;
+      const mustPaint = grid.dirty || microForce;
+      microForce = false;
+      if (mustPaint) renderer.paint();
+    });
+  }
   function schedulePaint(force = false): void {
     if (force) rafForce = true;
     if (rafPending) return;
@@ -556,7 +570,9 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
       // Force a paint when predictions are active so the overlay refreshes
       // (a prediction may have been consumed and its ghost needs removal)
       // even if grid had no new dirty lines this batch.
-      schedulePaint(predictions !== null && predictions.size > 0);
+      const force = predictions !== null && predictions.size > 0;
+      if (data.length <= 256 && !rafPending) scheduleImmediatePaint(force);
+      else schedulePaint(force);
     },
     fit() {
       if (renderer.fit()) {

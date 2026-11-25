@@ -119,9 +119,18 @@ export class DomRenderer {
   private overscan: number | null = null;
   private hadPredictions = false;
   private runState = new WeakMap<HTMLElement, { key: string; text: string }>();
+  private lineTop = new WeakMap<HTMLElement, number>();
   private styles = new Map<string, string>();
   private attrIds = new WeakMap<CellAttr, number>();
   private nextAttrId = 0;
+  private lastTargetHeight = -1;
+  private lastVpHeight = 0;
+  private lastScrollTop = 0;
+  private lastTrimmed = -1;
+  private lastFirst = -1;
+  private lastLast = -1;
+  private lastCursorKey = '';
+  private lastSearchKey = '';
 
   // Optional speculative-echo overlay. When set, paint() rebuilds the overlay
   // layer from this buffer on every frame. Items are small (0-5 typical).
@@ -166,6 +175,8 @@ export class DomRenderer {
       const atBottom =
         vp.scrollTop + vp.clientHeight >= vp.scrollHeight - this.lineHeight;
       this.stickBottom = atBottom;
+      this.lastVpHeight = vp.clientHeight;
+      this.lastScrollTop = vp.scrollTop;
       this.paint();
     });
   }
@@ -214,6 +225,8 @@ export class DomRenderer {
   fit(): boolean {
     const prev = { cols: this.grid.cols, rows: this.grid.rows };
     const { cols, rows } = this.computeGrid();
+    this.lastVpHeight = this.viewport.clientHeight;
+    this.lastTargetHeight = -1;
     if (cols === prev.cols && rows === prev.rows) return false;
     this.grid.resize(cols, rows);
     return true;
@@ -222,20 +235,34 @@ export class DomRenderer {
   paint(): void {
     const total = this.grid.totalLines();
     const targetHeight = total * this.lineHeight;
-    if (this.sizer.style.height !== `${targetHeight}px`) {
+    const heightChanged = targetHeight !== this.lastTargetHeight;
+    if (heightChanged) {
+      this.lastTargetHeight = targetHeight;
       this.sizer.style.height = `${targetHeight}px`;
     }
 
     const vp = this.viewport;
-    if (this.stickBottom) {
-      vp.scrollTop = Math.max(0, vp.scrollHeight - vp.clientHeight);
+    let vpHeight = this.lastVpHeight;
+    let scrollTop = this.lastScrollTop;
+    if (heightChanged || vpHeight === 0) {
+      vpHeight = vp.clientHeight || this.grid.rows * this.lineHeight;
+      this.lastVpHeight = vpHeight;
+      if (this.stickBottom) {
+        scrollTop = Math.max(0, targetHeight - vpHeight);
+        if (vp.scrollTop !== scrollTop) vp.scrollTop = scrollTop;
+      } else {
+        scrollTop = vp.scrollTop;
+      }
+      this.lastScrollTop = scrollTop;
+    } else if (!this.stickBottom) {
+      scrollTop = vp.scrollTop;
+      this.lastScrollTop = scrollTop;
     }
-    const scrollTop = vp.scrollTop;
-    const vpHeight = vp.clientHeight || this.grid.rows * this.lineHeight;
 
     const overscan = this.overscan ?? this.grid.rows;
-    const first = this.grid.trimmed + Math.max(0, Math.floor(scrollTop / this.lineHeight) - overscan);
-    const last = this.grid.trimmed + Math.min(
+    const trimmed = this.grid.trimmed;
+    const first = trimmed + Math.max(0, Math.floor(scrollTop / this.lineHeight) - overscan);
+    const last = trimmed + Math.min(
       total - 1,
       Math.ceil((scrollTop + vpHeight) / this.lineHeight) + overscan,
     );
@@ -245,36 +272,48 @@ export class DomRenderer {
     // for the next paint.
     const { dirtyAll, dirtyLines } = this.grid.consumeDirty();
 
-    // Remove stale
-    for (const [idx, el] of this.rendered) {
-      if (idx < first || idx > last) {
-        el.remove();
-        this.rendered.delete(idx);
-        if (this.linePool.length < this.grid.rows * 4) this.linePool.push(el);
+    const sameWindow = first === this.lastFirst && last === this.lastLast && trimmed === this.lastTrimmed;
+    if (sameWindow && !dirtyAll && dirtyLines.size <= 8) {
+      for (const idx of dirtyLines) {
+        if (idx < first || idx > last) continue;
+        const existing = this.rendered.get(idx);
+        if (existing) this.renderLineInto(existing, this.grid.renderLine(idx));
       }
-    }
-
-    // Add / update visible. For each visible absolute index:
-    //   - if no div exists: build one (newly scrolled into view).
-    //   - else if dirtyAll or index in dirtyLines: rebuild contents.
-    //   - else: just update top (cheap; the div is already correct).
-    for (let i = first; i <= last; i++) {
-      const existing = this.rendered.get(i);
-      const mustRebuild = dirtyAll || dirtyLines.has(i);
-      if (existing) {
-        existing.style.top = `${(i - this.grid.trimmed) * this.lineHeight}px`;
-        if (mustRebuild) {
-          this.renderLineInto(existing, this.grid.renderLine(i));
+    } else {
+      for (const [idx, el] of this.rendered) {
+        if (idx < first || idx > last) {
+          el.remove();
+          this.rendered.delete(idx);
+          if (this.linePool.length < this.grid.rows * 4) this.linePool.push(el);
         }
-        continue;
       }
-      const div = this.linePool.pop() ?? document.createElement('div');
-      div.className = 'cloudterm-line';
-      div.style.top = `${(i - this.grid.trimmed) * this.lineHeight}px`;
-      div.style.height = `${this.lineHeight}px`;
-      this.renderLineInto(div, this.grid.renderLine(i));
-      this.surface.appendChild(div);
-      this.rendered.set(i, div);
+
+      for (let i = first; i <= last; i++) {
+        const existing = this.rendered.get(i);
+        const topPx = (i - trimmed) * this.lineHeight;
+        const mustRebuild = dirtyAll || dirtyLines.has(i);
+        if (existing) {
+          if (this.lineTop.get(existing) !== topPx) {
+            existing.style.top = `${topPx}px`;
+            this.lineTop.set(existing, topPx);
+          }
+          if (mustRebuild) {
+            this.renderLineInto(existing, this.grid.renderLine(i));
+          }
+          continue;
+        }
+        const div = this.linePool.pop() ?? document.createElement('div');
+        div.className = 'cloudterm-line';
+        div.style.top = `${topPx}px`;
+        div.style.height = `${this.lineHeight}px`;
+        this.lineTop.set(div, topPx);
+        this.renderLineInto(div, this.grid.renderLine(i));
+        this.surface.appendChild(div);
+        this.rendered.set(i, div);
+      }
+      this.lastFirst = first;
+      this.lastLast = last;
+      this.lastTrimmed = trimmed;
     }
 
     // Rebuild prediction overlay before cursor so cursor is above it. The
@@ -297,17 +336,32 @@ export class DomRenderer {
 
   private positionSearchMatch(): void {
     const match = this.searchMatch;
-    if (!match) { this.searchEl.style.display = 'none'; return; }
+    if (!match) {
+      if (this.lastSearchKey !== '') {
+        this.lastSearchKey = '';
+        this.searchEl.style.display = 'none';
+      }
+      return;
+    }
+    const top = (match.line - this.grid.trimmed) * this.lineHeight;
+    const left = match.col * this.charWidth;
+    const width = match.length * this.charWidth;
+    const key = `${top}:${left}:${width}:${this.lineHeight}`;
+    if (key === this.lastSearchKey) return;
+    this.lastSearchKey = key;
     this.searchEl.style.display = 'block';
-    this.searchEl.style.top = `${(match.line - this.grid.trimmed) * this.lineHeight}px`;
-    this.searchEl.style.left = `${match.col * this.charWidth}px`;
-    this.searchEl.style.width = `${match.length * this.charWidth}px`;
+    this.searchEl.style.top = `${top}px`;
+    this.searchEl.style.left = `${left}px`;
+    this.searchEl.style.width = `${width}px`;
     this.searchEl.style.height = `${this.lineHeight}px`;
   }
 
   private positionCursor(): void {
     if (!this.grid.cursorVisible) {
-      this.cursorEl.style.display = 'none';
+      if (this.lastCursorKey !== 'off') {
+        this.lastCursorKey = 'off';
+        this.cursorEl.style.display = 'none';
+      }
       return;
     }
     let row = this.grid.cursorRow;
@@ -318,9 +372,14 @@ export class DomRenderer {
       col = latest.col;
     }
     const cursorAbs = this.grid.trimmed + this.grid.scrollback.length + row;
+    const top = (cursorAbs - this.grid.trimmed) * this.lineHeight;
+    const left = col * this.charWidth;
+    const key = `${top}:${left}:${this.charWidth}:${this.lineHeight}`;
+    if (key === this.lastCursorKey) return;
+    this.lastCursorKey = key;
     this.cursorEl.style.display = '';
-    this.cursorEl.style.top = `${(cursorAbs - this.grid.trimmed) * this.lineHeight}px`;
-    this.cursorEl.style.left = `${col * this.charWidth}px`;
+    this.cursorEl.style.top = `${top}px`;
+    this.cursorEl.style.left = `${left}px`;
     this.cursorEl.style.width = `${this.charWidth}px`;
     this.cursorEl.style.height = `${this.lineHeight}px`;
   }

@@ -204,29 +204,100 @@ export class AnsiParser {
       const first = text.charCodeAt(index);
       if (this.state === S_GROUND && first === 0x1b && text.charCodeAt(index + 1) === 0x5b && this.attr.link === undefined) {
         let end = index + 2;
-        let code = -1;
-        let next: CellAttr | null = this.attr;
+        let p0 = -1;
+        let p1 = -1;
+        let p2 = -1;
+        let p3 = -1;
+        let p4 = -1;
+        let pCount = 0;
+        let cur = -1;
+        let overflow = false;
         while (end < text.length) {
           const part = text.charCodeAt(end);
           if (part >= 0x30 && part <= 0x39) {
-            code = (code < 0 ? 0 : code) * 10 + part - 0x30;
+            cur = (cur < 0 ? 0 : cur) * 10 + part - 0x30;
             end++;
             continue;
           }
           if (part === 0x3b) {
-            next = code < 0 ? DEFAULT_ATTR : next && quickSgr(next, code);
-            code = -1;
+            if (pCount === 0) p0 = cur;
+            else if (pCount === 1) p1 = cur;
+            else if (pCount === 2) p2 = cur;
+            else if (pCount === 3) p3 = cur;
+            else if (pCount === 4) p4 = cur;
+            else overflow = true;
+            pCount++;
+            cur = -1;
             end++;
             continue;
           }
           break;
         }
-        if (text.charCodeAt(end) === 0x6d) {
-          next = code < 0 ? DEFAULT_ATTR : next && quickSgr(next, code);
-          if (next) {
-            this.sink.setAttr((this.attr = next));
+        const finalCode = text.charCodeAt(end);
+        if (!overflow && finalCode === 0x48 && pCount <= 1) {
+          const r = pCount === 0 ? (cur < 0 ? 1 : cur) : (p0 < 0 ? 1 : p0);
+          const c = pCount === 0 ? 1 : (cur < 0 ? 1 : cur);
+          this.sink.cursorPosition(r, c);
+          index = end + 1;
+          continue;
+        }
+        if (!overflow && finalCode === 0x4b && pCount === 0) {
+          this.sink.eraseInLine(cur < 0 ? 0 : cur);
+          index = end + 1;
+          continue;
+        }
+        if (!overflow && finalCode === 0x6d) {
+          if (pCount === 0) {
+            const next = cur < 0 ? DEFAULT_ATTR : quickSgr(this.attr, cur);
+            if (next) {
+              this.sink.setAttr((this.attr = next));
+              index = end + 1;
+              continue;
+            }
+          } else if (pCount === 1) {
+            const n0 = p0 < 0 ? DEFAULT_ATTR : quickSgr(this.attr, p0);
+            const n1 = cur < 0 ? DEFAULT_ATTR : n0 && quickSgr(n0, cur);
+            if (n1) {
+              this.sink.setAttr((this.attr = n1));
+              index = end + 1;
+              continue;
+            }
+          } else if (pCount === 2 && (p0 === 38 || p0 === 48) && p1 === 5 && cur >= 0 && cur <= 255) {
+            const next: CellAttr = { ...this.attr };
+            if (p0 === 38) next.fg = cur;
+            else next.bg = cur;
+            this.sink.setAttr((this.attr = canonicalAttr(next)));
             index = end + 1;
             continue;
+          } else if (pCount === 4 && (p0 === 38 || p0 === 48) && p1 === 2) {
+            const rgb = 0x01000000 | ((p2 & 0xff) << 16) | ((p3 & 0xff) << 8) | (cur & 0xff);
+            const next: CellAttr = { ...this.attr };
+            if (p0 === 38) next.fg = rgb;
+            else next.bg = rgb;
+            this.sink.setAttr((this.attr = canonicalAttr(next)));
+            index = end + 1;
+            continue;
+          } else if (pCount === 5 && (p1 === 38 || p1 === 48) && p2 === 2) {
+            const base = p0 < 0 ? DEFAULT_ATTR : quickSgr(this.attr, p0);
+            if (base) {
+              const rgb = 0x01000000 | ((p3 & 0xff) << 16) | ((p4 & 0xff) << 8) | (cur & 0xff);
+              const next: CellAttr = { ...base };
+              if (p1 === 38) next.fg = rgb;
+              else next.bg = rgb;
+              this.sink.setAttr((this.attr = canonicalAttr(next)));
+              index = end + 1;
+              continue;
+            }
+          } else if (pCount === 3 && (p1 === 38 || p1 === 48) && p2 === 5 && cur >= 0 && cur <= 255) {
+            const base = p0 < 0 ? DEFAULT_ATTR : quickSgr(this.attr, p0);
+            if (base) {
+              const next: CellAttr = { ...base };
+              if (p1 === 38) next.fg = cur;
+              else next.bg = cur;
+              this.sink.setAttr((this.attr = canonicalAttr(next)));
+              index = end + 1;
+              continue;
+            }
           }
         }
       }

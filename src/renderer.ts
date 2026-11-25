@@ -425,12 +425,12 @@ export class DomRenderer {
 
   private renderLineInto(div: HTMLDivElement, line: RenderLine): void {
     const codes = line.codes;
-    const charMask = 0x1fffff;
+    const charMask = 0xffff;
     let end = codes.length;
     while (end > 0) {
       const code = line.needsClear && end - 1 >= line.clearStart ? 32 : codes[end - 1]!;
       const ch = code & charMask;
-      const attr = line.attrs[code >>> 21]!;
+      const attr = line.attrs[code >>> 16]!;
       if ((ch === 0 || ch === 32) && attr.bg < 0 && !attr.reverse && !attr.underline && !attr.link) end--;
       else break;
     }
@@ -446,10 +446,10 @@ export class DomRenderer {
       const code = line.needsClear && i >= line.clearStart ? 32 : codes[i]!;
       const charCode = code & charMask;
       if (charCode === 0) continue;
-      const attrId = code >>> 21;
+      const attrId = code >>> 16;
       const ch = charCode < 128 ? String.fromCharCode(charCode) : line.strings[charCode - 128]!;
-      const next = i + 1 < codes.length && !(line.needsClear && i + 1 >= line.clearStart) ? codes[i + 1]! & charMask : 32;
-      if (wcwidth(ch) === 2 && next === 0) {
+      const next = charCode >= 128 && i + 1 < codes.length && !(line.needsClear && i + 1 >= line.clearStart) ? codes[i + 1]! & charMask : 32;
+      if (next === 0 && wcwidth(ch) === 2) {
         flush();
         runs.push({ text: ch, attr: line.attrs[attrId]!, attrId, width: 2 });
       } else if (attrId === runAttrId) runBuf += ch;

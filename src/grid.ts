@@ -58,7 +58,7 @@ export function blankCell(): Cell {
   return BLANK;
 }
 
-const CHAR_BITS = 21;
+const CHAR_BITS = 16;
 const CHAR_MASK = (1 << CHAR_BITS) - 1;
 const CONTINUATION = 0;
 
@@ -220,7 +220,19 @@ export class Grid {
   private lastCodeAttr: CellAttr | null = DEFAULT_ATTR;
   private lastAttrCode = 0;
   private strings: string[] = [];
+  private stringWidths: number[] = [];
   private stringIndexes = new Map<string, number>();
+
+  private internString(ch: string): number {
+    let i = this.stringIndexes.get(ch);
+    if (i === undefined) {
+      i = this.strings.length;
+      this.strings.push(ch);
+      this.stringWidths.push(wcwidth(ch));
+      this.stringIndexes.set(ch, i);
+    }
+    return i;
+  }
 
   private attrCode(attr: CellAttr): number {
     if (attr === this.lastCodeAttr) return this.lastAttrCode;
@@ -234,11 +246,15 @@ export class Grid {
     let ch: number;
     if (cell.ch === '') ch = CONTINUATION;
     else if (cell.ch.length === 1 && cell.ch.charCodeAt(0) < 128) ch = cell.ch.charCodeAt(0);
-    else { let i = this.stringIndexes.get(cell.ch); if (i === undefined) { i = this.strings.length; this.strings.push(cell.ch); this.stringIndexes.set(cell.ch, i); } ch = 128 + i; }
+    else ch = 128 + this.internString(cell.ch);
     return attr | ch;
   }
 
-  private isWideAt(row: Row, col: number): boolean { const code = row.needsClear && col >= row.clearStart ? 32 : row.codes[col]! & CHAR_MASK; return code > 126 && code !== CONTINUATION && wcwidth(code < 128 ? String.fromCharCode(code) : this.strings[code - 128]!) === 2; }
+  private isWideAt(row: Row, col: number): boolean {
+    if (row.needsClear && col >= row.clearStart) return false;
+    const ch = row.codes[col]! & CHAR_MASK;
+    return ch >= 128 && this.stringWidths[ch - 128] === 2;
+  }
 
   cellAt(row: Row, col: number): Cell {
     if (row.needsClear && col >= row.clearStart) return BLANK;
@@ -698,7 +714,23 @@ export class Grid {
   }
 
   writeChar(ch: string, attr: CellAttr): void {
-    const width = wcwidth(ch);
+    let chCode: number;
+    let width: number;
+    if (ch.length === 1) {
+      const c0 = ch.charCodeAt(0);
+      if (c0 >= 0x20 && c0 <= 0x7e) {
+        chCode = c0;
+        width = 1;
+      } else {
+        const idx = this.internString(ch);
+        chCode = 128 + idx;
+        width = this.stringWidths[idx]!;
+      }
+    } else {
+      const idx = this.internString(ch);
+      chCode = 128 + idx;
+      width = this.stringWidths[idx]!;
+    }
     if (width === 0) {
       this.appendCombining(ch);
       return;
@@ -712,14 +744,23 @@ export class Grid {
       this.wrapToNextLine();
     }
     const row = this.rowsData[this.cursorRow]!;
-    this.clearCell(row, this.cursorCol);
-    this.setCell(row, this.cursorCol, internCell(ch, attr));
+    const col = this.cursorCol;
+    if (row.needsClear && col !== row.clearStart) this.materializeRow(row);
+    const prevCode = row.needsClear && col >= row.clearStart ? 32 : row.codes[col]! & CHAR_MASK;
+    if (prevCode === CONTINUATION || (prevCode >= 128 && this.stringWidths[prevCode - 128] === 2)) this.clearCell(row, col);
+    const attrCode = this.attrCode(attr);
+    row.codes[col] = attrCode | chCode;
     if (width === 2) {
-      this.clearCell(row, this.cursorCol + 1);
-      this.setCell(row, this.cursorCol + 1, { ch: '', attr });
+      const nextCol = col + 1;
+      const nextCode = row.needsClear && nextCol >= row.clearStart ? 32 : row.codes[nextCol]! & CHAR_MASK;
+      if (nextCode === CONTINUATION || (nextCode >= 128 && this.stringWidths[nextCode - 128] === 2)) this.clearCell(row, nextCol);
+      row.codes[nextCol] = attrCode | CONTINUATION;
+      if (row.needsClear) row.clearStart = nextCol + 1;
+    } else if (row.needsClear) {
+      row.clearStart = col + 1;
     }
     this.markRow(this.cursorRow);
-    const next = this.cursorCol + width;
+    const next = col + width;
     if (next >= this.cols) {
       this.cursorCol = this.cols - 1;
       this.pendingWrap = this.autoWrapMode;
@@ -740,15 +781,18 @@ export class Grid {
 
   private clearCell(row: Row, col: number): void {
     if (col < 0 || col >= this.cols) return;
-    if (this.cellAt(row, col).ch === '') {
-      this.setCell(row, col, blankCell());
-      if (col > 0) this.setCell(row, col - 1, blankCell());
+    if (row.needsClear && col >= row.clearStart) return;
+    this.materializeRow(row);
+    const ch = row.codes[col]! & CHAR_MASK;
+    if (ch === CONTINUATION) {
+      row.codes[col] = 32;
+      if (col > 0) row.codes[col - 1] = 32;
       return;
     }
-    if (wcwidth(this.cellAt(row, col).ch) === 2 && col + 1 < this.cols && this.cellAt(row, col + 1).ch === '') {
-      this.setCell(row, col + 1, blankCell());
+    if (ch >= 128 && this.stringWidths[ch - 128] === 2 && col + 1 < this.cols && (row.codes[col + 1]! & CHAR_MASK) === CONTINUATION) {
+      row.codes[col + 1] = 32;
     }
-    this.setCell(row, col, blankCell());
+    row.codes[col] = 32;
   }
 
   private normalizeRow(row: Row): void {
@@ -876,11 +920,26 @@ export class Grid {
     this.clearPendingWrap();
     const row = this.rowsData[this.cursorRow]!;
     if (mode === 1) {
-      for (let c = 0; c <= this.cursorCol && c < this.cols; c++) this.clearCell(row, c);
+      const end = Math.min(this.cols - 1, this.cursorCol);
+      this.materializeRow(row);
+      if (end + 1 < this.cols && (row.codes[end + 1]! & CHAR_MASK) === CONTINUATION) row.codes[end + 1] = 32;
+      row.codes.fill(32, 0, end + 1);
     } else if (mode === 2) {
-      for (let c = 0; c < this.cols; c++) this.clearCell(row, c);
+      row.needsClear = true;
+      row.clearStart = 0;
     } else {
-      for (let c = this.cursorCol; c < this.cols; c++) this.clearCell(row, c);
+      const start = this.cursorCol;
+      if (start === 0) {
+        row.needsClear = true;
+        row.clearStart = 0;
+      } else if (!row.needsClear || start < row.clearStart) {
+        if (start < this.cols && (row.codes[start]! & CHAR_MASK) === CONTINUATION) row.codes[start - 1] = 32;
+        if (row.needsClear) {
+          row.clearStart = start;
+        } else {
+          row.codes.fill(32, start);
+        }
+      }
     }
     this.markRow(this.cursorRow);
   }

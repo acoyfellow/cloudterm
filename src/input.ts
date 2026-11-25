@@ -120,9 +120,16 @@ export class InputHandler {
   private getAppCursor: () => boolean;
   private getBracketedPaste: () => boolean;
   private predict: ((e: PredictEvent) => void) | null;
+  private composing = false;
+  private lastKeydownText = '';
+  private lastKeydownAt = 0;
+  private lastComposedText = '';
+  private lastComposedAt = 0;
   private boundKeydown = this.onKeydown.bind(this);
   private boundInput = this.onInput.bind(this);
   private boundPaste = this.onPaste.bind(this);
+  private boundCompositionStart = this.onCompositionStart.bind(this);
+  private boundCompositionEnd = this.onCompositionEnd.bind(this);
 
   constructor(parent: HTMLElement, opts: InputOpts) {
     this.onData = opts.onData;
@@ -142,18 +149,48 @@ export class InputHandler {
     this.ta.addEventListener('keydown', this.boundKeydown);
     this.ta.addEventListener('input', this.boundInput);
     this.ta.addEventListener('paste', this.boundPaste);
+    this.ta.addEventListener('compositionstart', this.boundCompositionStart);
+    this.ta.addEventListener('compositionend', this.boundCompositionEnd);
   }
 
   focus(): void {
     this.ta.focus({ preventScroll: true });
   }
 
+  private onCompositionStart(): void {
+    this.composing = true;
+  }
+
+  private onCompositionEnd(e: CompositionEvent): void {
+    this.composing = false;
+    const text = e.data || this.ta.value;
+    this.ta.value = '';
+    if (!text) return;
+    this.lastComposedText = text;
+    this.lastComposedAt = performance.now();
+    this.emitText(text);
+  }
+
+  private emitText(v: string): void {
+    if (this.predict) {
+      for (const ch of v) {
+        const cc = ch.charCodeAt(0);
+        if (cc >= 0x20 && cc !== 0x7f) this.predict({ kind: 'char', ch });
+      }
+    }
+    this.onData(ENC.encode(v));
+  }
+
   private onKeydown(e: KeyboardEvent): void {
+    if (this.composing || e.isComposing || e.keyCode === 229) return;
     const out = keyToBytes(e, this.getAppCursor());
     if (out) {
       e.preventDefault();
-      this.onData(out);
+      this.lastKeydownText = e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey ? e.key : '';
+      this.lastKeydownAt = performance.now();
       if (this.predict) this.emitPrediction(e);
+      this.onData(out);
+      this.ta.value = '';
     }
   }
 
@@ -170,18 +207,20 @@ export class InputHandler {
 
   private onInput(e: Event): void {
     const ta = e.target as HTMLTextAreaElement;
+    if (this.composing || (e as InputEvent).isComposing) return;
     const v = ta.value;
-    if (v.length > 0) {
-      this.onData(ENC.encode(v));
-      if (this.predict) {
-        // IME / composed chars: predict each resulting code point.
-        for (const ch of v) {
-          const cc = ch.charCodeAt(0);
-          if (cc >= 0x20 && cc !== 0x7f) this.predict({ kind: 'char', ch });
-        }
-      }
-      ta.value = '';
+    ta.value = '';
+    if (v.length === 0) return;
+    const now = performance.now();
+    if (this.lastKeydownText && v === this.lastKeydownText && now - this.lastKeydownAt < 50) {
+      this.lastKeydownText = '';
+      return;
     }
+    if (this.lastComposedText && v === this.lastComposedText && now - this.lastComposedAt < 50) {
+      this.lastComposedText = '';
+      return;
+    }
+    this.emitText(v);
   }
 
   private onPaste(e: ClipboardEvent): void {
@@ -198,6 +237,8 @@ export class InputHandler {
     this.ta.removeEventListener('keydown', this.boundKeydown);
     this.ta.removeEventListener('input', this.boundInput);
     this.ta.removeEventListener('paste', this.boundPaste);
+    this.ta.removeEventListener('compositionstart', this.boundCompositionStart);
+    this.ta.removeEventListener('compositionend', this.boundCompositionEnd);
     this.ta.remove();
   }
 }

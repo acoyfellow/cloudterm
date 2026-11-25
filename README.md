@@ -57,7 +57,7 @@ cloudterm renders selectable terminal text in the DOM and leaves the transport t
 |---|---|
 | Renderer | DOM text with virtualized visible lines |
 | Dependencies | 1 (`@chenglou/pretext`) |
-| Bundle | 54,129 bytes raw, 16,017 bytes gzip (~28 KB gz incl. pretext) |
+| Bundle | 55,331 bytes raw, 16,269 bytes gzip (~28 KB gz incl. pretext) |
 | Agent readability | 11/11 `innerText`, 10/11 a11y, 8/8 input |
 | VT conformance | 15/18 automated checks (missing: DEC line drawing, resize reflow, custom tab stops) |
 | License | MIT |

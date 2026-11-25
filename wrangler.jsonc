@@ -1,0 +1,16 @@
+{
+  "name": "cloudterm-demo",
+  "account_id": "29db7c74093386544fed8046ef083a4b",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./site",
+    "html_handling": "auto-trailing-slash"
+  },
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "cloudterm.customer0.dev",
+      "custom_domain": true
+    }
+  ]
+}

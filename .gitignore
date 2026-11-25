@@ -5,3 +5,5 @@ node_modules
 .env.local
 bun.lock.backup
 test/REPORT.md
+site
+.wrangler

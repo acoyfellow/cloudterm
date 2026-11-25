@@ -1,37 +1,125 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>cloudterm demo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>cloudterm · DOM web terminal</title>
+    <meta name="description" content="Tiny DOM-rendered terminal emulator on @chenglou/pretext. Live interactive demo with Agent Vision DOM inspection." />
+    <link rel="canonical" href="https://cloudterm.customer0.dev/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:opsz,wght@6..144,400..600&family=Google+Sans+Code:wght@400;500&display=swap" />
     <style>
-      html, body { margin: 0; padding: 0; height: 100%; background: #0b0c10; color: #e6e8eb; font-family: system-ui, sans-serif; }
-      body { display: grid; grid-template-rows: auto auto 1fr; }
-      .banner { padding: 8px 12px; background: #132017; color: #7cc4ff; font-size: 12px; border-bottom: 1px solid #222; }
-      header { padding: 8px 12px; border-bottom: 1px solid #222; font-size: 13px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-      header button { background: #1a1c22; color: #e6e8eb; border: 1px solid #333; padding: 4px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
-      header button:hover { background: #242730; }
-      #term { width: 100%; height: 100%; }
-      .size { color: #888; font-size: 12px; }
-      .focus-pill { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
-      .focus-pill.focused { background: #143a1f; color: #5be07a; }
-      .focus-pill.blurred { background: #3a1414; color: #e05b5b; }
-      .spacer { flex: 1; }
+      :root {
+        --bg: #111215;
+        --raise: #181a1f;
+        --line: #272a32;
+        --text: #eceef2;
+        --dim: #9aa0ab;
+        --faint: #676d78;
+        --accent: #f38020;
+        --green: #38c77a;
+        --sans: "Google Sans Flex", system-ui, -apple-system, sans-serif;
+        --mono: "Google Sans Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--text); font: 400 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+      body { display: grid; grid-template-rows: auto auto 1fr auto; min-height: 100dvh; }
+      a { color: var(--dim); text-decoration: none; }
+      a:hover { color: var(--text); text-decoration: underline; }
+      .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+      .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+      .brand h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+      .pill { font: 500 11px var(--mono); padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+      .pill.live { border-color: #26593d; color: var(--green); }
+      .nav { display: flex; gap: 14px; font: 400 12px var(--mono); flex-wrap: wrap; }
+      .controls { display: flex; gap: 8px; align-items: center; padding: 9px 16px; border-bottom: 1px solid var(--line); background: var(--raise); flex-wrap: wrap; }
+      .controls button { background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 4px 10px; border-radius: 6px; cursor: pointer; font: 400 12px var(--mono); }
+      .controls button:hover { border-color: #464c5a; background: #1e2128; }
+      .controls button.active { border-color: var(--accent); color: var(--accent); }
+      .controls input { background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 4px 8px; border-radius: 6px; font: 400 12px var(--mono); width: 135px; }
+      .controls input:focus, .controls button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .spacer { flex: 1; min-width: 8px; }
+      .meta { font: 400 11px var(--mono); color: var(--dim); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .focus-pill { padding: 2px 7px; border-radius: 999px; font: 500 10px var(--mono); letter-spacing: 0.04em; border: 1px solid var(--line); }
+      .focus-pill.focused { border-color: #26593d; color: var(--green); }
+      .focus-pill.blurred { color: var(--faint); }
+      .stage { display: grid; grid-template-columns: 1fr 360px; min-height: 0; overflow: hidden; }
+      .stage.no-xray { grid-template-columns: 1fr; }
+      .term-pane { position: relative; min-width: 0; min-height: 360px; background: #0b0c10; }
+      #term { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .xray { display: flex; flex-direction: column; border-left: 1px solid var(--line); background: #13151a; min-height: 0; overflow: hidden; }
+      .stage.no-xray .xray { display: none; }
+      .xray-head { padding: 9px 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+      .xray-head strong { font: 500 12px var(--mono); color: var(--text); }
+      .xray-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
+      .xray-stats div { background: #13151a; padding: 6px 10px; }
+      .xray-stats dt { font: 400 10px var(--mono); color: var(--faint); text-transform: uppercase; letter-spacing: 0.05em; }
+      .xray-stats dd { margin: 2px 0 0; font: 500 12px var(--mono); color: var(--text); }
+      .xray-note { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--dim); border-bottom: 1px solid var(--line); }
+      .xray pre { margin: 0; padding: 10px 12px; font: 400 11px/1.45 var(--mono); color: #b7c2d0; overflow: auto; flex: 1; white-space: pre-wrap; word-break: break-word; }
+      footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 16px; border-top: 1px solid var(--line); font: 400 11px var(--mono); color: var(--dim); flex-wrap: wrap; }
+      code { font-family: var(--mono); color: var(--text); background: var(--raise); padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); }
+      @media (max-width: 900px) {
+        .stage { grid-template-columns: 1fr; grid-template-rows: minmax(360px, 1fr) 260px; }
+        .xray { border-left: 0; border-top: 1px solid var(--line); }
+      }
     </style>
   </head>
   <body>
-    <div class="banner">type anything — you should see it appear below. Arrow keys, Ctrl+C, and paste should all work.</div>
-    <header>
-      <strong>cloudterm demo</strong>
-      <button id="write-sample">sample</button>
-      <button id="write-colors">colors</button>
-      <button id="write-256">256-color</button>
-      <button id="write-burst">10k lines</button>
-      <button id="clear">clear</button>
-      <div class="spacer"></div>
-      <span class="size" id="size"></span>
-      <span class="focus-pill blurred" id="focus-state">BLURRED</span>
+    <header class="top">
+      <div class="brand">
+        <h1>cloudterm</h1>
+        <span class="pill live">v0.0.17 · 16 KB gz</span>
+        <span class="pill">DOM + @chenglou/pretext</span>
+        <span class="pill">11/11 agent innerText · 15/18 VT</span>
+      </div>
+      <nav class="nav" aria-label="Links">
+        <a href="https://termlab.coey.dev/">termlab benchmarks</a>
+        <a href="https://github.com/acoyfellow/cloudterm">github</a>
+        <a href="https://www.npmjs.com/package/cloudterm">npm</a>
+        <a href="/llms.txt">llms.txt</a>
+        <a href="https://customer0.dev/">customer0</a>
+      </nav>
     </header>
-    <div id="term"></div>
+    <div class="controls" role="toolbar" aria-label="Demo controls">
+      <button id="write-sample" type="button">sample</button>
+      <button id="write-colors" type="button">colors</button>
+      <button id="write-256" type="button">256-color</button>
+      <button id="write-tui" type="button">TUI frame</button>
+      <button id="write-unicode" type="button">unicode + links</button>
+      <button id="write-burst" type="button">10k lines</button>
+      <button id="clear" type="button">clear</button>
+      <input id="search-input" type="search" placeholder="find in buffer..." aria-label="Find in terminal buffer" />
+      <button id="toggle-xray" type="button" class="active" aria-pressed="true">Agent Vision</button>
+      <div class="spacer"></div>
+      <div class="meta">
+        <span id="write-ms">write —</span>
+        <span id="size">80 x 24</span>
+        <span class="focus-pill blurred" id="focus-state">BLURRED</span>
+      </div>
+    </div>
+    <main class="stage" id="stage">
+      <div class="term-pane"><div id="term"></div></div>
+      <aside class="xray" aria-label="Agent Vision DOM inspector">
+        <div class="xray-head">
+          <strong>Agent Vision · live DOM innerText</strong>
+          <span class="pill live">0 ms lag</span>
+        </div>
+        <dl class="xray-stats">
+          <div><dt>DOM lines</dt><dd id="xray-lines">0</dd></div>
+          <div><dt>DOM nodes</dt><dd id="xray-nodes">0</dd></div>
+          <div><dt>Agent tokens</dt><dd id="xray-tokens">0</dd></div>
+          <div><dt>Query replies</dt><dd id="xray-replies">0</dd></div>
+        </dl>
+        <p class="xray-note">What <code>element.innerText</code>, Cmd+F, native selection, screen readers and browser agents read right now. Canvas terminals return 0 tokens.</p>
+        <pre id="xray-text"></pre>
+      </aside>
+    </main>
+    <footer>
+      <span>Install: <code>npm i cloudterm</code> · Type <code>help</code> in the terminal or click any payload above.</span>
+      <span>MIT · <a href="https://termlab.coey.dev/">Honest benchmark report on termlab.coey.dev</a></span>
+    </footer>
 
     <script type="module" src="./main.ts"></script>
   </body>

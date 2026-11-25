@@ -2,6 +2,8 @@
 
 > DOM web terminal: mount it into a sized element, write bytes in, get keyboard bytes out.
 
+Demo: https://cloudterm.customer0.dev/ · Benchmarks: https://termlab.coey.dev/ · Source: https://github.com/acoyfellow/cloudterm
+
 Install: `npm i cloudterm` (`bun add cloudterm`, `pnpm add cloudterm`).
 
 A CSS import and explicitly sized host are required.

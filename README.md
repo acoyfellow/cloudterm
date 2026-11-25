@@ -5,7 +5,7 @@ Tiny DOM-rendered terminal emulator for the web.
 [![CI](https://github.com/acoyfellow/cloudterm/actions/workflows/ci.yml/badge.svg)](https://github.com/acoyfellow/cloudterm/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Live demo and benchmarks: [termlab.coey.dev](https://termlab.coey.dev/)
+Live demo: [cloudterm.customer0.dev](https://cloudterm.customer0.dev/) · Benchmarks & VT conformance: [termlab.coey.dev](https://termlab.coey.dev/)
 
 ## Quick start
 
@@ -57,7 +57,9 @@ cloudterm renders selectable terminal text in the DOM and leaves the transport t
 |---|---|
 | Renderer | DOM text with virtualized visible lines |
 | Dependencies | 1 (`@chenglou/pretext`) |
-| Bundle | 48,483 bytes raw, 14,335 bytes gzip |
+| Bundle | 54,129 bytes raw, 16,017 bytes gzip (~28 KB gz incl. pretext) |
+| Agent readability | 11/11 `innerText`, 10/11 a11y, 8/8 input |
+| VT conformance | 15/18 automated checks (missing: DEC line drawing, resize reflow, custom tab stops) |
 | License | MIT |
 
 ## How it works

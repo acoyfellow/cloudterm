@@ -1,6 +1,6 @@
 {
   "name": "cloudterm",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "description": "Tiny DOM-rendered terminal emulator for the web.",
   "author": "Jordan Coeyman <jordan@coey.dev>",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "type": "git",
     "url": "git+https://github.com/acoyfellow/cloudterm.git"
   },
-  "homepage": "https://termlab.coey.dev/",
+  "homepage": "https://cloudterm.customer0.dev/",
   "bugs": "https://github.com/acoyfellow/cloudterm/issues",
   "keywords": [
     "terminal",
@@ -43,6 +43,7 @@
     "build": "tsdown && bun scripts/strip-dts-regions.ts",
     "dev": "tsdown --watch",
     "dev:demo": "bun --hot scripts/dev.ts",
+    "build:demo": "bun scripts/build-demo.ts",
     "demo:check": "bun scripts/demo-check.ts",
     "typecheck": "tsc --noEmit",
     "pretest": "tsx scripts/gen-css.ts",
@@ -55,7 +56,7 @@
     "fuzz": "bun test/fuzz-equivalence.ts"
   },
   "sizeBudget": {
-    "dist/index.js": 15360
+    "dist/index.js": 16896
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.5"

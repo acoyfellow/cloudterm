@@ -33,10 +33,10 @@ function updateXray(): void {
 
 function scheduleXray(): void {
   if (xrayTimer) return;
-  xrayTimer = requestAnimationFrame(() => {
+  xrayTimer = window.setTimeout(() => {
     xrayTimer = 0;
     updateXray();
-  });
+  }, 80);
 }
 
 function timedWrite(payload: string): void {
@@ -193,12 +193,12 @@ function writeTui(): void {
   const bar = '─'.repeat(w - 2);
   const out = [
     '\r\n\x1b[38;2;96;115;138m┌' + bar + '┐\x1b[0m',
-    `\x1b[38;2;96;115;138m│\x1b[0m \x1b[1;38;2;120;220;180mcloudterm live dashboard\x1b[0m   \x1b[38;5;214m16 KB gz\x1b[0m   \x1b[38;5;81m11/11 AX\x1b[0m   \x1b[38;5;141m0 WASM\x1b[0m`,
+    `\x1b[38;2;96;115;138m│\x1b[0m \x1b[1;38;2;120;220;180mcloudterm live dashboard\x1b[0m   \x1b[38;5;214m18 KB gz\x1b[0m   \x1b[38;5;81m18/18 VT\x1b[0m   \x1b[38;5;141m10/10 UX\x1b[0m`,
     '\x1b[38;2;96;115;138m├' + bar + '┤\x1b[0m',
-    '\x1b[38;2;96;115;138m│\x1b[0m \x1b[38;2;115;210;155mPASS\x1b[0m scroll-flood    36.4 ms CPU  (DOM virtualized, 10k scrollback)',
-    '\x1b[38;2;96;115;138m│\x1b[0m \x1b[38;2;115;210;155mPASS\x1b[0m full-redraw     24.0 ms CPU  (typed-array grid + fused ASCII)',
-    '\x1b[38;2;96;115;138m│\x1b[0m \x1b[38;2;240;195;90mINFO\x1b[0m conformance     15/18 VT     (DA1, DA2, DA3, DSR 5n/6n, OSC 10-12)',
-    '\x1b[38;2;96;115;138m│\x1b[0m \x1b[7m STATUS \x1b[27m [████████████████████████████░░░░░░░░] 70%  selectable DOM text',
+    '\x1b[38;2;96;115;138m│\x1b[0m \x1b[38;2;115;210;155mPASS\x1b[0m scroll-flood    35–37 ms CPU  (#1, virtualized DOM, 10k scrollback)',
+    '\x1b[38;2;96;115;138m│\x1b[0m \x1b[38;2;115;210;155mPASS\x1b[0m full-redraw     20–23 ms CPU  (#1, typed-array grid + fused ASCII)',
+    '\x1b[38;2;96;115;138m│\x1b[0m \x1b[38;2;115;210;155mPASS\x1b[0m conformance     18/18 VT      (reflow, DEC line draw, ?2026, queries)',
+    '\x1b[38;2;96;115;138m│\x1b[0m \x1b[7m STATUS \x1b[27m [████████████████████████████████████] 100%  selectable DOM text',
     '\x1b[38;2;96;115;138m└' + bar + '┘\x1b[0m\r\n$ ',
   ].join('\r\n');
   timedWrite(out);

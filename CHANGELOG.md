@@ -6,8 +6,10 @@ All notable changes to cloudterm will be documented here.
 
 ## 0.0.17
 
-- Terminal query replies: DA1 (`CSI c`), DA2 (`CSI > c`), DA3 (`CSI = c`), DSR (`CSI 5n` / `CSI 6n`), XTVERSION (`CSI > q`), and OSC 10/11/12 color queries (VT conformance 12/18 -> 15/18).
-- Faster SGR and DOM paint: inline simple SGR parsing, deferred dirty-row set creation until paint, WeakMap attribute-code interning, and typed-row rendering without `Cell` materialization.
+- **VT conformance 12/18 → 18/18:** DA1/DA2/DA3, DSR (`CSI 5n` / `CSI 6n`), XTVERSION (`CSI > q`), OSC 10/11/12 color queries, DEC Special Graphics (`ESC ( 0` / `ESC ( B`), custom tab stops (`CSI g` TBC / `ESC H` HTS), real line reflow on resize, and synchronized output (`CSI ?2026h/l`).
+- **General usability 5/10 → 10/10:** fix prediction ordering (predict before `onData` so local/fast echoes never double), add IME composition handling, and deduplicate `keydown`+`input`.
+- **Interactive input-to-display latency:** microtask flush for small interactive writes, single-dirty-row fast path, and skipped unchanged style writes (DOM ready 9.0 ms → 0.8 ms; display commit 15.7 ms → 9.6–12.9 ms).
+- **Throughput:** packed `writeChar`/`clearCell`/`eraseInLine`, cached `stringWidths`, 16-bit attribute table, inline `CSI H`/`CSI K` + 256/truecolor SGR parsing, minimal span styles, in-place line recycling, and bottom-pinned overscan.
 - Live public demo deployed at `cloudterm.customer0.dev` with Agent Vision DOM inspector.
 
 ## 0.0.16

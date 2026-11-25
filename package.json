@@ -56,7 +56,7 @@
     "fuzz": "bun test/fuzz-equivalence.ts"
   },
   "sizeBudget": {
-    "dist/index.js": 16896
+    "dist/index.js": 20480
   },
   "dependencies": {
     "@chenglou/pretext": "^0.0.5"

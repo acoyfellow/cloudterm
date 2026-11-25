@@ -118,7 +118,7 @@ export class DomRenderer {
   private linePool: HTMLDivElement[] = [];
   private overscan: number | null = null;
   private hadPredictions = false;
-  private runState = new WeakMap<HTMLElement, { key: string; text: string }>();
+  private runState = new WeakMap<HTMLElement, { key: string; text: string; styled: boolean; linked: boolean }>();
   private lineTop = new WeakMap<HTMLElement, number>();
   private styles = new Map<string, string>();
   private attrIds = new WeakMap<CellAttr, number>();
@@ -259,7 +259,7 @@ export class DomRenderer {
       this.lastScrollTop = scrollTop;
     }
 
-    const overscan = this.overscan ?? this.grid.rows;
+    const overscan = this.overscan ?? (this.stickBottom ? 2 : this.grid.rows);
     const trimmed = this.grid.trimmed;
     const first = trimmed + Math.max(0, Math.floor(scrollTop / this.lineHeight) - overscan);
     const last = trimmed + Math.min(
@@ -280,11 +280,11 @@ export class DomRenderer {
         if (existing) this.renderLineInto(existing, this.grid.renderLine(idx));
       }
     } else {
+      const reusable: HTMLDivElement[] = [];
       for (const [idx, el] of this.rendered) {
         if (idx < first || idx > last) {
-          el.remove();
           this.rendered.delete(idx);
-          if (this.linePool.length < this.grid.rows * 4) this.linePool.push(el);
+          reusable.push(el);
         }
       }
 
@@ -302,6 +302,16 @@ export class DomRenderer {
           }
           continue;
         }
+        const reused = reusable.pop();
+        if (reused) {
+          if (this.lineTop.get(reused) !== topPx) {
+            reused.style.top = `${topPx}px`;
+            this.lineTop.set(reused, topPx);
+          }
+          this.renderLineInto(reused, this.grid.renderLine(i));
+          this.rendered.set(i, reused);
+          continue;
+        }
         const div = this.linePool.pop() ?? document.createElement('div');
         div.className = 'cloudterm-line';
         div.style.top = `${topPx}px`;
@@ -310,6 +320,10 @@ export class DomRenderer {
         this.renderLineInto(div, this.grid.renderLine(i));
         this.surface.appendChild(div);
         this.rendered.set(i, div);
+      }
+      for (const leftover of reusable) {
+        leftover.remove();
+        if (this.linePool.length < this.grid.rows * 4) this.linePool.push(leftover);
       }
       this.lastFirst = first;
       this.lastLast = last;
@@ -494,31 +508,53 @@ export class DomRenderer {
     }
     const key = `${styleId}:${width}:${this.charWidth}`;
     const state = this.runState.get(element);
+    let styled = state?.styled ?? false;
+    let linked = state?.linked ?? false;
     if (!state || state.key !== key) {
       let style = this.styles.get(key);
-      if (!style) {
+      if (style === undefined) {
         const fgColor = colorOf(fg, 'var(--ct-fg)');
         const bgColor = colorOf(bg, attr.reverse ? 'var(--ct-fg)' : 'transparent');
-        style = `color:${fgColor === 'var(--ct-fg)' ? '' : fgColor};background:${bgColor === 'transparent' ? '' : bgColor};font-weight:${attr.bold ? 'bold' : ''};font-style:${attr.italic ? 'italic' : ''};text-decoration:${attr.underline ? 'underline' : ''};${width === 2 ? `display:inline-block;width:${this.charWidth * 2}px;` : ''}`;
+        let s = '';
+        if (fgColor !== 'var(--ct-fg)') s += `color:${fgColor};`;
+        if (bgColor !== 'transparent') s += `background:${bgColor};`;
+        if (attr.bold) s += 'font-weight:bold;';
+        if (attr.italic) s += 'font-style:italic;';
+        if (attr.underline) s += 'text-decoration:underline;';
+        if (width === 2) s += `display:inline-block;width:${this.charWidth * 2}px;`;
+        style = s;
         this.styles.set(key, style);
       }
-      element.setAttribute('style', style);
+      if (style) {
+        element.setAttribute('style', style);
+        styled = true;
+      } else if (styled) {
+        element.removeAttribute('style');
+        styled = false;
+      }
       if (link) {
         element.className = 'cloudterm-link';
         element.setAttribute('href', link);
         element.setAttribute('target', '_blank');
         element.setAttribute('rel', 'noopener noreferrer');
-      } else {
+        linked = true;
+      } else if (linked) {
         element.className = '';
-        if (state) {
-          element.removeAttribute('href');
-          element.removeAttribute('target');
-          element.removeAttribute('rel');
-        }
+        element.removeAttribute('href');
+        element.removeAttribute('target');
+        element.removeAttribute('rel');
+        linked = false;
       }
     }
-    if (!state || state.text !== text) element.textContent = text;
-    this.runState.set(element, { key, text });
+    if (!state || state.text !== text) {
+      const first = element.firstChild;
+      if (first && first.nodeType === 3 && element.childNodes.length === 1) {
+        (first as Text).data = text;
+      } else {
+        element.textContent = text;
+      }
+    }
+    this.runState.set(element, { key, text, styled, linked });
   }
 
   scrollToLine(line: number): void {

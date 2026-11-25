@@ -238,7 +238,13 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     }
   }
 
-  const headless = createHeadless(scenario.cols, scenario.rows);
+  let termRef: pty.IPty | undefined;
+  const headless = createHeadless(scenario.cols, scenario.rows, {
+    reply: (text) => {
+      if (!termRef) return;
+      termRef.write(text);
+    },
+  });
 
   let term: pty.IPty | undefined;
   try {
@@ -257,6 +263,7 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     result.durationMs = Date.now() - started;
     return result;
   }
+  termRef = term;
 
   term.onData((data) => {
     // node-pty emits strings by default. writeString is cheaper than

@@ -92,6 +92,12 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     predictions.onGridCursor(grid.cursorRow, grid.cursorCol);
   };
 
+  const replyEncoder = new TextEncoder();
+  const reply = (text: string): void => {
+    if (text.length === 0) return;
+    opts.onData(replyEncoder.encode(text));
+  };
+
   // Parser wired to grid.
   let currentAttr: CellAttr = defaultAttr();
   let lastPrinted = ' ';
@@ -297,6 +303,33 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
     },
     clipboard(text, selection) {
       opts.onClipboard?.(text, selection);
+    },
+    primaryDeviceAttributes() {
+      reply('\x1b[?1;2c');
+    },
+    secondaryDeviceAttributes() {
+      reply('\x1b[>100;0;0c');
+    },
+    tertiaryDeviceAttributes() {
+      reply('\x1bP!|00000000\x1b\\');
+    },
+    deviceStatusReport(mode) {
+      if (mode === 5) {
+        reply('\x1b[0n');
+      } else if (mode === 6) {
+        reply(`\x1b[${grid.cursorRow + 1};${grid.cursorCol + 1}R`);
+      }
+    },
+    xtVersion() {
+      reply(`\x1bP>|cloudterm ${VERSION_STRING}\x1b\\`);
+    },
+    colorQuery(which) {
+      const hex =
+        which === 'fg' ? theme.foreground :
+        which === 'bg' ? theme.background :
+        theme.cursor;
+      const ps = which === 'fg' ? '10' : which === 'bg' ? '11' : '12';
+      reply(`\x1b]${ps};${hexToXtermRgb(hex)}\x1b\\`);
     },
   };
 
@@ -588,6 +621,23 @@ export async function mount(el: HTMLElement, opts: MountOptions): Promise<Termin
   };
 
   return term;
+}
+
+const VERSION_STRING = '0.0.17';
+
+function hexToXtermRgb(hex: string): string {
+  let h = hex.trim();
+  if (h.startsWith('#')) h = h.slice(1);
+  if (h.length === 3) {
+    h = h.split('').map((c) => c + c).join('');
+  }
+  if (h.length !== 6) {
+    return 'rgb:0000/0000/0000';
+  }
+  const r = h.slice(0, 2);
+  const g = h.slice(2, 4);
+  const b = h.slice(4, 6);
+  return `rgb:${r}${r}/${g}${g}/${b}${b}`;
 }
 
 function nextFrame(): Promise<void> {

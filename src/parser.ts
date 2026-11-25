@@ -120,6 +120,12 @@ export interface ParserSink {
   // title, a breadcrumb, or to spawn new tabs in the same cwd.
   setCurrentDirectory(uri: string): void;
   clipboard?(text: string, selection: string): void;
+  primaryDeviceAttributes?(): void;
+  secondaryDeviceAttributes?(): void;
+  tertiaryDeviceAttributes?(): void;
+  deviceStatusReport?(mode: number): void;
+  xtVersion?(): void;
+  colorQuery?(which: 'fg' | 'bg' | 'cursor'): void;
 }
 
 // State machine states
@@ -280,7 +286,12 @@ export class AnsiParser {
         else if (code === 0x1b) this.state = S_IGNORED_CONTROL_STRING_ESC;
         return;
       case S_IGNORED_CONTROL_STRING_ESC:
-        this.state = ch === '\\' ? S_GROUND : S_IGNORED_CONTROL_STRING;
+        if (ch === '\\') {
+          this.state = S_GROUND;
+          return;
+        }
+        this.state = S_ESC;
+        this.esc(ch, code);
         return;
     }
   }
@@ -337,7 +348,10 @@ export class AnsiParser {
       this.state = S_IGNORED_CONTROL_STRING;
       return;
     }
-    // Simple ESC sequences
+    if (ch === 'N' || ch === 'O') {
+      this.state = S_ESC_AWAITING_CHARSET_FINAL;
+      return;
+    }
     switch (ch) {
       case '7':
         this.sink.saveCursor();
@@ -358,10 +372,12 @@ export class AnsiParser {
       case 'c':
         this.reset();
         break;
+      case '=':
+      case '>':
+        break;
       default:
         break;
     }
-    // Handle 2-byte ESC sequences that still need another char? Skip for v1.
     this.state = S_GROUND;
     void code;
   }
@@ -419,7 +435,6 @@ export class AnsiParser {
   }
 
   private dispatchOsc(): void {
-    // Format "Ps;Pt". Handled: 0/1/2 (window title), 7 (current working dir).
     const buf = this.oscBuf;
     this.oscBuf = '';
     const idx = buf.indexOf(';');
@@ -437,6 +452,12 @@ export class AnsiParser {
       this.setLink(pt);
     } else if (ps === '52') {
       this.handleClipboard(pt);
+    } else if (ps === '10' && pt === '?') {
+      this.sink.colorQuery?.('fg');
+    } else if (ps === '11' && pt === '?') {
+      this.sink.colorQuery?.('bg');
+    } else if (ps === '12' && pt === '?') {
+      this.sink.colorQuery?.('cursor');
     }
     this.state = S_GROUND;
   }
@@ -616,6 +637,25 @@ export class AnsiParser {
       case 'u':
         if (isPrivate) return;
         this.sink.restoreCursor();
+        return;
+      case 'c':
+        if (this.intermediate === '>') {
+          this.sink.secondaryDeviceAttributes?.();
+        } else if (this.intermediate === '=') {
+          this.sink.tertiaryDeviceAttributes?.();
+        } else if (this.intermediate === '') {
+          this.sink.primaryDeviceAttributes?.();
+        }
+        return;
+      case 'n':
+        if (!isPrivate) this.sink.deviceStatusReport?.(this.p(0, 0));
+        return;
+      case 'q':
+        if (this.intermediate === '>') {
+          this.sink.xtVersion?.();
+        }
+        return;
+      case 't':
         return;
       default:
         return;

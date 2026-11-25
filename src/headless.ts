@@ -43,6 +43,11 @@ export interface Headless {
 
 export interface CreateHeadlessOptions {
   maxScrollback?: number;
+  reply?: (text: string) => void;
+  themeFg?: string;
+  themeBg?: string;
+  themeCursor?: string;
+  version?: string;
 }
 
 export function createHeadless(
@@ -56,6 +61,22 @@ export function createHeadless(
   const cwds: string[] = [];
   let bells = 0;
   let lastPrinted = ' ';
+
+  const replyFn = opts.reply;
+  const themeFg = opts.themeFg ?? '#e6e8eb';
+  const themeBg = opts.themeBg ?? '#0b0c10';
+  const themeCursor = opts.themeCursor ?? '#7cc4ff';
+  const version = opts.version ?? 'test';
+  const hexToXtermRgb = (hex: string): string => {
+    let h = hex.trim();
+    if (h.startsWith('#')) h = h.slice(1);
+    if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+    if (h.length !== 6) return 'rgb:0000/0000/0000';
+    const r = h.slice(0, 2);
+    const g = h.slice(2, 4);
+    const b = h.slice(4, 6);
+    return `rgb:${r}${r}/${g}${g}/${b}${b}`;
+  };
 
   const sink: ParserSink = {
     print(ch) {
@@ -194,6 +215,30 @@ export function createHeadless(
     },
     setCurrentDirectory(uri) {
       cwds.push(uri);
+    },
+    primaryDeviceAttributes() {
+      replyFn?.('\x1b[?1;2c');
+    },
+    secondaryDeviceAttributes() {
+      replyFn?.('\x1b[>100;0;0c');
+    },
+    tertiaryDeviceAttributes() {
+      replyFn?.('\x1bP!|00000000\x1b\\');
+    },
+    deviceStatusReport(mode) {
+      if (mode === 5) {
+        replyFn?.('\x1b[0n');
+      } else if (mode === 6) {
+        replyFn?.(`\x1b[${grid.cursorRow + 1};${grid.cursorCol + 1}R`);
+      }
+    },
+    xtVersion() {
+      replyFn?.(`\x1bP>|cloudterm ${version}\x1b\\`);
+    },
+    colorQuery(which) {
+      const hex = which === 'fg' ? themeFg : which === 'bg' ? themeBg : themeCursor;
+      const ps = which === 'fg' ? '10' : which === 'bg' ? '11' : '12';
+      replyFn?.(`\x1b]${ps};${hexToXtermRgb(hex)}\x1b\\`);
     },
   };
 
